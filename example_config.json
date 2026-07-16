@@ -1,0 +1,77 @@
+{
+  "verbose": true,
+  "timeout": 5,
+  "num_cycles": 0,
+  "t_cycle": 30,
+  "save_audit": false,
+  "db_file": "modbus_logger.db",
+  "connection": {
+    "transport": "tcp",
+    "host": "192.168.0.10",
+    "port": 502,
+    "timeout": 5,
+    "address_base": 0
+  },
+  "queries": [
+    {
+      "name": "coil_example",
+      "function": "read_coils",
+      "unit": 1,
+      "address": 0,
+      "count": 8
+    },
+    {
+      "name": "discrete_inputs_example",
+      "function": "read_discrete_inputs",
+      "unit": 1,
+      "address": 0,
+      "count": 8
+    },
+    {
+      "name": "holding_reg_uint16",
+      "function": "read_holding_registers",
+      "unit": 1,
+      "address": 100,
+      "count": 1,
+      "data_type": "uint16",
+      "endian": "Big"
+    },
+    {
+      "name": "holding_reg_int32_le",
+      "function": "read_holding_registers",
+      "unit": 1,
+      "address": 102,
+      "count": 2,
+      "data_type": "int32",
+      "endian": "Little"
+    },
+    {
+      "name": "input_reg_float",
+      "function": "read_input_registers",
+      "unit": 1,
+      "address": 200,
+      "count": 2,
+      "data_type": "float32",
+      "endian": "Big"
+    },
+    {
+      "name": "device_id",
+      "function": "read_device_identification",
+      "unit": 1
+    },
+    {
+      "name": "write_single_example",
+      "function": "write_single_register",
+      "unit": 1,
+      "address": 300,
+      "value": 123
+    },
+    {
+      "name": "write_multiple_example",
+      "function": "write_holding_registers",
+      "unit": 1,
+      "address": 400,
+      "values": [1, 2, 3]
+    }
+  ]
+}
