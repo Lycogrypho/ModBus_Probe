@@ -1096,7 +1096,7 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
     if is_write or cfg.get("save_audit", False):
         db.insert_audit(serialized, is_write=is_write)
 
-    if func in ("read_coils", "read_input_registers", "read_holding_registers", "read_device_information"):
+    if func in ("read_coils", "read_discrete_inputs", "read_input_registers", "read_holding_registers", "read_device_information"):
         table_name = name
         db.ensure_data_table(table_name)
         try:
