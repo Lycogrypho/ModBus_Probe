@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Modbus_Logger
+Modbus_Logger (async)
 
-Sends Modbus requests based on config.json, parses replies and stores results in SQLite.
+Async counterpart of modbus_logger.py. Sends Modbus requests based on config.json,
+parses replies and stores results in SQLite using AsyncModbusTcpClient.
 
-Requires: pymodbus v3.x (already available). Uses only standard library otherwise.
-
-Date: 2025-10-22
+Requires: pymodbus v3.x. Uses only standard library otherwise.
 """
 
 import asyncio
@@ -14,32 +13,27 @@ import json
 import os
 import sys
 import sqlite3
-import time
 import struct
 import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-# pymodbus imports (v3.x)
 from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.client.base import ModbusBaseClient
 from pymodbus.pdu import ExceptionResponse
 
 # ---------- Utility helpers ----------
 
 def now_ts() -> str:
-    """Return current UTC timestamp as ISO string."""
     return datetime.utcnow().isoformat() + "Z"
 
 def log(msg: str, verbose: bool):
-    """Print message depending on verbosity."""
     if verbose:
         print(f"[{now_ts()}] {msg}")
 
-# ---------- Config handling ----------
+# ---------- Config ----------
 
 def load_config(path: str) -> Dict[str, Any]:
-    """Load and validate config.json from path."""
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     cfg.setdefault("verbose", False)
@@ -49,10 +43,9 @@ def load_config(path: str) -> Dict[str, Any]:
     cfg.setdefault("save_audit", False)
     return cfg
 
-# ---------- SQLite DB management ----------
+# ---------- SQLite ----------
 
 class DBManager:
-    """Manage SQLite connection and ensure required tables exist."""
     def __init__(self, db_path: str, verbose: bool = False):
         self.db_path = db_path
         self.verbose = verbose
@@ -63,10 +56,8 @@ class DBManager:
         self._ensure_audit_table()
 
     def _ensure_audit_table(self):
-        """Create audit_trail table if not exists."""
         with self.lock:
-            cur = self.conn.cursor()
-            cur.execute("""
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_trail (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ts TEXT NOT NULL,
@@ -76,39 +67,36 @@ class DBManager:
             """)
             self.conn.commit()
 
-    def ensure_data_table(self, table_name: str):
-        """Create a simple data table for a query: timestamp + value (TEXT)."""
-        safe_name = self._sanitize_table(table_name)
+    def ensure_data_table(self, table_name: str) -> str:
+        safe = self._sanitize(table_name)
         with self.lock:
-            cur = self.conn.cursor()
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {safe_name} (
+            self.conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS {safe} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ts TEXT NOT NULL,
                     value TEXT
                 )
             """)
             self.conn.commit()
-        return safe_name
+        return safe
 
     def insert_audit(self, query_serialized: str, is_write: bool):
-        """Insert an audit entry."""
         with self.lock:
-            cur = self.conn.cursor()
-            cur.execute("INSERT INTO audit_trail (ts, query, is_write) VALUES (?, ?, ?)",
-                        (now_ts(), query_serialized, 1 if is_write else 0))
+            self.conn.execute(
+                "INSERT INTO audit_trail (ts, query, is_write) VALUES (?, ?, ?)",
+                (now_ts(), query_serialized, 1 if is_write else 0),
+            )
             self.conn.commit()
 
     def insert_data(self, table_name: str, value: str):
-        """Insert a value into a data table."""
-        safe_name = self._sanitize_table(table_name)
+        safe = self._sanitize(table_name)
         with self.lock:
-            cur = self.conn.cursor()
-            cur.execute(f"INSERT INTO {safe_name} (ts, value) VALUES (?, ?)", (now_ts(), value))
+            self.conn.execute(
+                f"INSERT INTO {safe} (ts, value) VALUES (?, ?)", (now_ts(), value)
+            )
             self.conn.commit()
 
-    def _sanitize_table(self, name: str) -> str:
-        """Sanitize table name (simple): replace non-alnum/_ with underscore."""
+    def _sanitize(self, name: str) -> str:
         safe = "".join(c if (c.isalnum() or c == "_") else "_" for c in name)
         if not safe:
             safe = "table"
@@ -119,48 +107,279 @@ class DBManager:
     def close(self):
         self.conn.close()
 
-# ---------- Async Modbus monitor ----------
+# ---------- Address normalization ----------
+
+def normalize_modbus_address(address: Any, function: str, address_base: int = 0) -> int:
+    """Convert Modbus address to 0-indexed PDU address. address_base in connection block."""
+    addr = int(address)
+    if addr <= 65535:
+        return addr - address_base
+    offsets = {
+        "read_holding_registers":  400001,
+        "write_single_register":   400001,
+        "write_holding_registers": 400001,
+        "mask_write_register":     400001,
+        "read_input_registers":    300001,
+        "read_discrete_inputs":    100001,
+        "read_coils":              1,
+        "write_single_coil":       1,
+        "write_coils":             1,
+    }
+    return addr - offsets.get(function, 0) + address_base
+
+# ---------- Parsing ----------
+
+def parse_bits(bitlist: List[bool]) -> str:
+    return ",".join("1" if b else "0" for b in bitlist)
+
+def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
+    if not registers:
+        return None
+    data_type = {
+        "REAL": "float32", "BOOL": "bool", "INT": "int16", "UINT": "uint16",
+        "DINT": "int32", "UDINT": "uint32",
+    }.get(data_type, data_type)
+    try:
+        if endian == "Little":
+            raw = b"".join(struct.pack("<H", r & 0xFFFF) for r in registers)
+            bo = "<"
+        else:
+            raw = b"".join(struct.pack(">H", r & 0xFFFF) for r in registers)
+            bo = ">"
+        if data_type == "bool":    return bool(registers[0])
+        if data_type == "uint16":  return registers[0] & 0xFFFF
+        if data_type == "int16":   return struct.unpack(bo + "h", raw[:2])[0]
+        if data_type == "uint32":  return struct.unpack(bo + "I", raw[:4])[0]
+        if data_type == "int32":   return struct.unpack(bo + "i", raw[:4])[0]
+        if data_type == "float32": return struct.unpack(bo + "f", raw[:4])[0]
+        if data_type == "float64": return struct.unpack(bo + "d", raw[:8])[0]
+        if data_type == "hex":     return raw.hex()
+        return registers
+    except Exception:
+        return registers
+
+# ---------- Async Modbus client ----------
 
 class ModbusLoggerAsync:
-    """Async Modbus monitor — async counterpart of ModbusClientWrapper."""
+    """Async Modbus client wrapper — async counterpart of ModbusClientWrapper."""
 
-    def __init__(self, host, interval=1.0):
-        self.host = host
-        self.interval = interval
-        self.running = False
-        self.client = None
+    def __init__(self, cfg: Dict[str, Any], verbose: bool = False):
+        self.verbose = verbose
+        conn = cfg.get("connection", {})
+        self.client = AsyncModbusTcpClient(
+            host=conn.get("host", "127.0.0.1"),
+            port=int(conn.get("port", 502)),
+            timeout=conn.get("timeout", 5),
+        )
 
-    async def start(self):
-        """Start monitoring."""
-        self.client = AsyncModbusTcpClient(self.host)
-        await self.client.connect()
-        self.running = True
+    async def connect(self) -> bool:
+        return await self.client.connect()
 
-        while self.running:
-            try:
-                result = await self.client.read_holding_registers(0, 10)
-                if not result.isError():
-                    await self.process_data(result.registers)
-                await asyncio.sleep(self.interval)
-            except Exception as e:
-                print(f"Error: {e}")
-                await asyncio.sleep(5)
+    async def close(self):
+        self.client.close()
 
-    async def process_data(self, data):
-        """Process received data."""
-        print(f"Data: {data}")
+    def _unwrap(self, resp):
+        if resp is None:
+            return False, "No response"
+        if isinstance(resp, ExceptionResponse):
+            return False, f"Modbus exception: {resp}"
+        if getattr(resp, "isError", None) and resp.isError():
+            return False, f"Error response: {resp}"
+        return True, resp
 
-    async def stop(self):
-        """Stop monitoring."""
-        self.running = False
-        if self.client:
-            self.client.close()
+    async def read_coils(self, unit: int, address: int, count: int, **_):
+        return self._unwrap(await self.client.read_coils(address=address, count=count, device_id=unit))
+
+    async def read_discrete_inputs(self, unit: int, address: int, count: int, **_):
+        return self._unwrap(await self.client.read_discrete_inputs(address=address, count=count, device_id=unit))
+
+    async def read_holding_registers(self, unit: int, address: int, count: int, **_):
+        log("executing read_holding_registers", self.verbose)
+        r = await self.client.read_holding_registers(address=address, count=count, device_id=unit)
+        if not r.isError():
+            for i, value in enumerate(r.registers):
+                log(f"Register {address+i}: {value}", self.verbose)
+        return self._unwrap(r)
+
+    async def read_input_registers(self, unit: int, address: int, count: int, **_):
+        return self._unwrap(await self.client.read_input_registers(address=address, count=count, device_id=unit))
+
+    async def write_single_register(self, unit: int, address: int, value: int, **_):
+        return self._unwrap(await self.client.write_register(address=address, value=value, device_id=unit))
+
+    async def write_holding_registers(self, unit: int, address: int, values: List[int], **_):
+        return self._unwrap(await self.client.write_registers(address=address, values=values, device_id=unit))
+
+    async def read_device_information(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.read_device_information(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def mask_write_register(self, unit: int, address: int, and_mask: int, or_mask: int, **_):
+        try:
+            return self._unwrap(await self.client.mask_write_register(address=address, and_mask=and_mask, or_mask=or_mask, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+# ---------- Query execution ----------
+
+CALL_MAP = {
+    "read_coils":               ("read_coils",               ["address", "count"]),
+    "read_discrete_inputs":     ("read_discrete_inputs",     ["address", "count"]),
+    "read_holding_registers":   ("read_holding_registers",   ["address", "count"]),
+    "read_input_registers":     ("read_input_registers",     ["address", "count"]),
+    "write_single_register":    ("write_single_register",    ["address", "value"]),
+    "write_holding_registers":  ("write_holding_registers",  ["address", "values"]),
+    "read_device_identification": ("read_device_information", []),
+    "mask_write_register":      ("mask_write_register",      ["address", "and_mask", "or_mask"]),
+}
+
+STORE_FUNCS = frozenset({
+    "read_coils", "read_discrete_inputs", "read_input_registers",
+    "read_holding_registers", "read_device_identification",
+})
+
+async def execute_query(
+    client: ModbusLoggerAsync,
+    db: DBManager,
+    query: Dict[str, Any],
+    cfg: Dict[str, Any],
+    address_base: int,
+):
+    verbose = cfg.get("verbose", False)
+    func = query.get("function")
+    unit = int(query.get("unit", cfg.get("unit", 1)))
+    name = query.get("name", func)
+    serialized = json.dumps(query, ensure_ascii=False)
+
+    if func not in CALL_MAP:
+        log(f"Unsupported function '{func}' in query '{name}'", verbose)
+        return
+
+    method_name, required_args = CALL_MAP[func]
+    kw: Dict[str, Any] = {}
+    for arg in required_args:
+        if arg not in query:
+            log(f"Missing argument '{arg}' for '{func}' in '{name}'", verbose)
+            return
+        kw[arg] = query[arg]
+
+    if "address" in kw:
+        kw["address"] = normalize_modbus_address(kw["address"], func, address_base)
+
+    log(f"Query -> name:{name} function:{func} unit:{unit} params:{kw}", verbose)
+
+    success, resp = await getattr(client, method_name)(unit=unit, **kw)
+
+    is_write = func.startswith("write")
+    if not success:
+        log(f"Query '{name}' failed: {resp}", verbose)
+        if cfg.get("save_audit", False) or is_write:
+            db.insert_audit(serialized, is_write=is_write)
+        return
+
+    if is_write or cfg.get("save_audit", False):
+        db.insert_audit(serialized, is_write=is_write)
+
+    parsed_value: Any = None
+    try:
+        if func in ("read_coils", "read_discrete_inputs"):
+            bits = getattr(resp, "bits", None) or getattr(resp, "bits_message", None)
+            parsed_value = parse_bits(bits if bits is not None else [])
+        elif func in ("read_holding_registers", "read_input_registers"):
+            regs = getattr(resp, "registers", []) or []
+            parsed_value = decode_registers(regs, query.get("data_type", "uint16"), query.get("endian", "Big"))
+        elif func == "read_device_identification":
+            if hasattr(resp, "information"):
+                try:
+                    parsed_value = {str(k): str(v) for k, v in resp.information.items()}
+                except Exception:
+                    parsed_value = str(resp)
+            else:
+                parsed_value = str(resp)
+        else:
+            parsed_value = str(resp)
+    except Exception as e:
+        parsed_value = f"Parse error: {e}"
+
+    if func in STORE_FUNCS:
+        db.ensure_data_table(name)
+        try:
+            val = json.dumps(parsed_value, ensure_ascii=False) if not isinstance(parsed_value, (str, int, float, type(None))) else str(parsed_value)
+        except Exception:
+            val = str(parsed_value)
+        db.insert_data(name, val)
+
+    log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
+
+# ---------- Main loop ----------
 
 async def main():
-    monitor = ModbusLoggerAsync('192.168.1.100')
-    task = asyncio.create_task(monitor.start())
-    await asyncio.sleep(10)
-    await monitor.stop()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    cfg_path = os.path.join(base_dir, "config.json")
+    if not os.path.exists(cfg_path):
+        print("config.json not found in script directory.")
+        sys.exit(1)
+
+    cfg = load_config(cfg_path)
+    verbose = cfg.get("verbose", False)
+    address_base = int(cfg.get("connection", {}).get("address_base", 0))
+
+    db = DBManager(cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db")), verbose=verbose)
+    client = ModbusLoggerAsync(cfg, verbose=verbose)
+
+    if not await client.connect():
+        print("Unable to connect to Modbus server.")
+        sys.exit(1)
+
+    queries = cfg.get("queries", [])
+    if not isinstance(queries, list) or not queries:
+        log("No queries defined in config.json", verbose)
+        await client.close()
+        db.close()
+        sys.exit(1)
+
+    num_cycles = int(cfg.get("num_cycles", 0))
+    t_cycle = float(cfg.get("t_cycle", 30))
+    cycle_count = 0
+
+    try:
+        while True:
+            cycle_start = time.monotonic()
+            cycle_count += 1
+            if num_cycles != 0 and cycle_count > num_cycles:
+                log("Completed requested number of cycles. Exiting.", verbose)
+                break
+
+            log(f"Starting cycle {cycle_count}", verbose)
+
+            for q in queries:
+                try:
+                    await execute_query(client, db, q, cfg, address_base)
+                except Exception as e:
+                    log(f"Exception in query '{q.get('name', q.get('function'))}': {e}", verbose)
+
+            elapsed = time.monotonic() - cycle_start
+            wait = t_cycle - elapsed
+            if wait > 0:
+                log(f"Cycle {cycle_count} done in {elapsed:.2f}s, sleeping {wait:.2f}s", verbose)
+                await asyncio.sleep(wait)
+            else:
+                log(f"Cycle {cycle_count} took {elapsed:.2f}s (no sleep)", verbose)
+
+            if num_cycles != 0 and cycle_count >= num_cycles:
+                log("Reached num_cycles; exiting loop.", verbose)
+                break
+
+    except asyncio.CancelledError:
+        log("Cancelled.", True)
+    except KeyboardInterrupt:
+        log("Interrupted by user.", True)
+    finally:
+        await client.close()
+        db.close()
+        log("Shutdown complete.", True)
 
 if __name__ == "__main__":
     asyncio.run(main())
