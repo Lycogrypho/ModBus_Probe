@@ -121,8 +121,8 @@ class DBManager:
 
 # ---------- Async Modbus monitor ----------
 
-class AsyncModbusMonitor:
-    """Continuously monitor Modbus devices."""
+class ModbusLoggerAsync:
+    """Async Modbus monitor — async counterpart of ModbusClientWrapper."""
 
     def __init__(self, host, interval=1.0):
         self.host = host
@@ -157,7 +157,7 @@ class AsyncModbusMonitor:
             self.client.close()
 
 async def main():
-    monitor = AsyncModbusMonitor('192.168.1.100')
+    monitor = ModbusLoggerAsync('192.168.1.100')
     task = asyncio.create_task(monitor.start())
     await asyncio.sleep(10)
     await monitor.stop()
