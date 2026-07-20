@@ -167,7 +167,7 @@ class ModbusClientWrapper:
 
     # The following functions return a tuple: (success: bool, result_or_error)
     def read_coils(self, unit: int, address: int, count: int, **kwargs):
-        r = self.client.read_coils(address, count) # ,unit=unit)
+        r = self.client.read_coils(address=address, count=count, device_id=unit)
         ''' read_coils(address: int, *, count: int = 1, device_id: int = 1, no_response_expected: bool = False) → T
 
     Read coils (code 0x01).
@@ -241,7 +241,7 @@ class ModbusClientWrapper:
         return self._unwrap_response(r)
 
     def read_input_registers(self, unit: int, address: int, count: int, **kwargs):
-        r = self.client.read_input_registers(address, count) # ,unit=unit)
+        r = self.client.read_input_registers(address=address, count=count, device_id=unit)
         '''
         
 read_input_registers(address: int, *, count: int = 1, device_id: int = 1, no_response_expected: bool = False) → T
@@ -318,7 +318,7 @@ write_coils(address: int, values: list[bool], *, device_id: int = 1, no_response
     Coils are addressed as 0-N (Note some device manuals uses 1-N, assuming 1==0).'''
     
     def write_single_register(self, unit: int, address: int, value: int, **kwargs):
-        r = self.client.write_register(address, value) # ,unit=unit)
+        r = self.client.write_register(address=address, value=value, device_id=unit)
         '''
         
 write_register(address: int, value: int, *, device_id: int = 1, no_response_expected: bool = False) → T
@@ -347,7 +347,7 @@ write_register(address: int, value: int, *, device_id: int = 1, no_response_expe
         return self._unwrap_response(r)
 
     def write_holding_registers(self, unit: int, address: int, values: List[int], **kwargs):
-        r = self.client.write_registers(address, values) # ,unit=unit)
+        r = self.client.write_registers(address=address, values=values, device_id=unit)
         '''
 
 write_registers(address: int, values: list[int], *, device_id: int = 1, no_response_expected: bool = False) → T
