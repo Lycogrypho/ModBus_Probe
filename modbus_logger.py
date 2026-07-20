@@ -212,14 +212,12 @@ class ModbusClientWrapper:
         return self._unwrap_response(r)
     
     def read_holding_registers(self, unit: int, address: int, count: int, **kwargs):
-        log("executing read_holding_registers", True)
+        log("executing read_holding_registers", self.verbose)
         r = self.client.read_holding_registers(address=int(address), count=int(count), device_id=unit, no_response_expected=False)
-        # Read 10 holding registers
-        #r = self.client.read_holding_registers(address=int(address), count=10, device_id=1)
 
         if not r.isError():
             for i, value in enumerate(r.registers):
-                log(f"Register {100+i}: {value}", True)
+                log(f"Register {address+i}: {value}", self.verbose)
         '''
          read_holding_registers(address: int, *, count: int = 1, device_id: int = 1, no_response_expected: bool = False) → T
 
