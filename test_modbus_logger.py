@@ -1,0 +1,158 @@
+"""
+Tests for ModbusClientWrapper methods implemented in 3.1.
+No pytest needed — run: py test_modbus_client.py
+"""
+import sys
+import types
+import unittest
+from unittest.mock import MagicMock, patch
+
+
+def _make_wrapper(mock_client):
+    """Return a ModbusClientWrapper with a pre-injected mock pymodbus client."""
+    with patch("pymodbus.client.ModbusTcpClient", return_value=mock_client):
+        from modbus_logger import ModbusClientWrapper
+        cfg = {"transport": "tcp", "host": "127.0.0.1", "port": 502}
+        wrapper = ModbusClientWrapper(cfg, verbose=False)
+        wrapper.client = mock_client
+    return wrapper
+
+
+def _ok_resp():
+    r = MagicMock()
+    r.isError.return_value = False
+    return r
+
+
+def _err_resp():
+    from pymodbus.pdu import ExceptionResponse
+    return ExceptionResponse(function_code=1, exception_code=2)
+
+
+class TestWriteMethods(unittest.TestCase):
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.mock_client.is_socket_open.return_value = True
+        self.wrapper = _make_wrapper(self.mock_client)
+
+    def test_write_coil_calls_correct_pymodbus(self):
+        self.mock_client.write_coil.return_value = _ok_resp()
+        ok, _ = self.wrapper.write_coil(unit=3, address=5, value=True)
+        self.assertTrue(ok)
+        self.mock_client.write_coil.assert_called_once_with(address=5, value=True, device_id=3)
+
+    def test_write_coils_calls_correct_pymodbus(self):
+        self.mock_client.write_coils.return_value = _ok_resp()
+        ok, _ = self.wrapper.write_coils(unit=1, address=10, values=[True, False])
+        self.assertTrue(ok)
+        self.mock_client.write_coils.assert_called_once_with(address=10, values=[True, False], device_id=1)
+
+    def test_write_coil_propagates_error(self):
+        self.mock_client.write_coil.return_value = _err_resp()
+        ok, msg = self.wrapper.write_coil(unit=1, address=0, value=False)
+        self.assertFalse(ok)
+        self.assertIn("Modbus exception", msg)
+
+    def test_write_single_register_passes_device_id(self):
+        self.mock_client.write_register.return_value = _ok_resp()
+        self.wrapper.write_single_register(unit=7, address=100, value=42)
+        self.mock_client.write_register.assert_called_once_with(address=100, value=42, device_id=7)
+
+    def test_write_holding_registers_passes_device_id(self):
+        self.mock_client.write_registers.return_value = _ok_resp()
+        self.wrapper.write_holding_registers(unit=2, address=200, values=[1, 2, 3])
+        self.mock_client.write_registers.assert_called_once_with(address=200, values=[1, 2, 3], device_id=2)
+
+
+class TestDiagMethods(unittest.TestCase):
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.mock_client.is_socket_open.return_value = True
+        self.wrapper = _make_wrapper(self.mock_client)
+
+    def test_read_exception_status(self):
+        self.mock_client.read_exception_status.return_value = _ok_resp()
+        ok, _ = self.wrapper.read_exception_status(unit=1)
+        self.assertTrue(ok)
+        self.mock_client.read_exception_status.assert_called_once_with(device_id=1)
+
+    def test_diag_query_data(self):
+        self.mock_client.diag_query_data.return_value = _ok_resp()
+        ok, _ = self.wrapper.diag_query_data(unit=1, msg=b"\x00\x01")
+        self.assertTrue(ok)
+        self.mock_client.diag_query_data.assert_called_once_with(msg=b"\x00\x01", device_id=1)
+
+    def test_diag_restart_communication(self):
+        self.mock_client.diag_restart_communication.return_value = _ok_resp()
+        ok, _ = self.wrapper.diag_restart_communication(unit=1, toggle=True)
+        self.assertTrue(ok)
+        self.mock_client.diag_restart_communication.assert_called_once_with(toggle=True, device_id=1)
+
+    def test_read_diagnostic_register(self):
+        self.mock_client.diag_read_diagnostic_register.return_value = _ok_resp()
+        ok, _ = self.wrapper.read_diagnostic_register(unit=1)
+        self.assertTrue(ok)
+        self.mock_client.diag_read_diagnostic_register.assert_called_once_with(device_id=1)
+
+
+class TestDeviceIdMethods(unittest.TestCase):
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.mock_client.is_socket_open.return_value = True
+        self.wrapper = _make_wrapper(self.mock_client)
+
+    def test_read_device_identification_calls_report_device_id(self):
+        self.mock_client.report_device_id.return_value = _ok_resp()
+        ok, _ = self.wrapper.read_device_identification(unit=4)
+        self.assertTrue(ok)
+        self.mock_client.report_device_id.assert_called_once_with(device_id=4)
+
+    def test_read_device_identification_handles_exception(self):
+        self.mock_client.report_device_id.side_effect = RuntimeError("comm error")
+        ok, msg = self.wrapper.read_device_identification(unit=1)
+        self.assertFalse(ok)
+        self.assertIn("Exception", msg)
+
+    def test_read_device_information_calls_mei(self):
+        self.mock_client.read_device_information.return_value = _ok_resp()
+        ok, _ = self.wrapper.read_device_information(unit=1)
+        self.assertTrue(ok)
+        self.mock_client.read_device_information.assert_called_once_with(device_id=1)
+
+    def test_mask_write_register_passes_device_id(self):
+        self.mock_client.mask_write_register.return_value = _ok_resp()
+        ok, _ = self.wrapper.mask_write_register(unit=5, address=300, and_mask=0xFF00, or_mask=0x00FF)
+        self.assertTrue(ok)
+        self.mock_client.mask_write_register.assert_called_once_with(
+            address=300, and_mask=0xFF00, or_mask=0x00FF, device_id=5
+        )
+
+
+class TestCallMap(unittest.TestCase):
+    def test_all_new_functions_in_call_map(self):
+        from modbus_logger import _CALL_MAP
+        for func in ("write_coil", "write_coils", "read_exception_status",
+                     "read_diagnostic_register", "diag_query_data",
+                     "diag_restart_communication", "read_device_identification",
+                     "read_device_information"):
+            self.assertIn(func, _CALL_MAP, f"{func} missing from _CALL_MAP")
+
+    def test_read_device_identification_not_redirected(self):
+        from modbus_logger import _CALL_MAP
+        method, _ = _CALL_MAP["read_device_identification"]
+        self.assertEqual(method, "read_device_identification",
+                         "read_device_identification should call its own method, not redirect to read_device_information")
+
+    def test_new_read_funcs_in_store_funcs(self):
+        from modbus_logger import _STORE_FUNCS
+        for func in ("read_exception_status", "read_diagnostic_register",
+                     "read_device_identification", "read_device_information"):
+            self.assertIn(func, _STORE_FUNCS, f"{func} missing from _STORE_FUNCS")
+
+
+if __name__ == "__main__":
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromModule(__import__("__main__"))
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
