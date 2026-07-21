@@ -17,7 +17,7 @@ import sqlite3
 import time
 import struct
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 # pymodbus imports (v3.x)
@@ -32,7 +32,7 @@ from pymodbus.pdu import ExceptionResponse
 
 def now_ts() -> str:
     """Return current UTC timestamp as ISO string."""
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat()
 
 def log(msg: str, verbose: bool):
     """Print message depending on verbosity."""
@@ -1035,6 +1035,11 @@ def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
 
 # ---------- Main execution logic ----------
 
+_STORE_FUNCS = frozenset({
+    "read_coils", "read_discrete_inputs", "read_input_registers",
+    "read_holding_registers", "read_device_information",
+})
+
 _CALL_MAP: Dict[str, tuple] = {
     "read_coils":               ("read_coils",            ["address", "count"]),
     "read_discrete_inputs":     ("read_discrete_inputs",  ["address", "count"]),
@@ -1046,7 +1051,7 @@ _CALL_MAP: Dict[str, tuple] = {
     "mask_write_register":      ("mask_write_register",   ["address", "and_mask", "or_mask"]),
 }
 
-def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, Any], cfg: Dict[str, Any]):
+def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, Any], cfg: Dict[str, Any], address_base: int = 0):
     """
     Execute single query dict. Query keys expected:
       - name: unique name for storage
@@ -1075,7 +1080,6 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
         kw[arg] = query[arg]
 
     if "address" in kw:
-        address_base = int(cfg.get("connection", {}).get("address_base", 0))
         kw["address"] = normalize_modbus_address(kw["address"], func, address_base)
 
     if cfg.get("verbose", False):
@@ -1124,9 +1128,8 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
     if is_write or cfg.get("save_audit", False):
         db.insert_audit(serialized, is_write=is_write)
 
-    if func in ("read_coils", "read_discrete_inputs", "read_input_registers", "read_holding_registers", "read_device_information"):
+    if func in _STORE_FUNCS:
         table_name = name
-        db.ensure_data_table(table_name)
         try:
             val_to_store = json.dumps(parsed_value, ensure_ascii=False) if not isinstance(parsed_value, (str, int, float, type(None))) else str(parsed_value)
         except Exception:
@@ -1160,6 +1163,7 @@ def main():
     if args.verbose:
         cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
+    address_base = int(cfg.get("connection", {}).get("address_base", 0))
 
     db_file = cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db"))
     db = DBManager(db_file, verbose=verbose)
@@ -1176,17 +1180,21 @@ def main():
         db.close()
         sys.exit(1)
 
+    for q in queries:
+        if q.get("function") in _STORE_FUNCS:
+            db.ensure_data_table(q.get("name", q.get("function")))
+
     num_cycles = int(cfg.get("num_cycles", 0))
     t_cycle = float(cfg.get("t_cycle", 30))
     cycle_count = 0
 
     try:
         while True:
-            cycle_start = time.time()
-            cycle_count += 1
-            if num_cycles != 0 and cycle_count > num_cycles:
+            if num_cycles != 0 and cycle_count >= num_cycles:
                 log("Completed requested number of cycles. Exiting.", verbose)
                 break
+            cycle_count += 1
+            cycle_start = time.time()
 
             if verbose:
                 log(f"Starting cycle {cycle_count}", True)
@@ -1205,7 +1213,7 @@ def main():
 
             for q in queries:
                 try:
-                    execute_query(client, db, q, cfg)
+                    execute_query(client, db, q, cfg, address_base)
                 except Exception as e:
                     log(f"Exception executing query '{q.get('name', q.get('function'))}': {e}", verbose)
 
@@ -1218,10 +1226,6 @@ def main():
             else:
                 if verbose:
                     log(f"Cycle {cycle_count} took {elapsed:.2f}s (no sleep)", True)
-
-            if num_cycles != 0 and cycle_count >= num_cycles:
-                log("Reached num_cycles; exiting loop.", verbose)
-                break
 
     except KeyboardInterrupt:
         log("Interrupted by user.", True)

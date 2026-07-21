@@ -17,7 +17,7 @@ import sqlite3
 import struct
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pymodbus.client import AsyncModbusTcpClient
@@ -26,7 +26,7 @@ from pymodbus.pdu import ExceptionResponse
 # ---------- Utility helpers ----------
 
 def now_ts() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat()
 
 def log(msg: str, verbose: bool):
     if verbose:
@@ -338,7 +338,6 @@ async def execute_query(
         parsed_value = f"Parse error: {e}"
 
     if func in STORE_FUNCS:
-        db.ensure_data_table(name)
         try:
             val = json.dumps(parsed_value, ensure_ascii=False) if not isinstance(parsed_value, (str, int, float, type(None))) else str(parsed_value)
         except Exception:
@@ -385,17 +384,21 @@ async def main():
         db.close()
         sys.exit(1)
 
+    for q in queries:
+        if q.get("function") in STORE_FUNCS:
+            db.ensure_data_table(q.get("name", q.get("function")))
+
     num_cycles = int(cfg.get("num_cycles", 0))
     t_cycle = float(cfg.get("t_cycle", 30))
     cycle_count = 0
 
     try:
         while True:
-            cycle_start = time.monotonic()
-            cycle_count += 1
-            if num_cycles != 0 and cycle_count > num_cycles:
+            if num_cycles != 0 and cycle_count >= num_cycles:
                 log("Completed requested number of cycles. Exiting.", verbose)
                 break
+            cycle_count += 1
+            cycle_start = time.monotonic()
 
             log(f"Starting cycle {cycle_count}", verbose)
 
@@ -424,10 +427,6 @@ async def main():
                 await asyncio.sleep(wait)
             else:
                 log(f"Cycle {cycle_count} took {elapsed:.2f}s (no sleep)", verbose)
-
-            if num_cycles != 0 and cycle_count >= num_cycles:
-                log("Reached num_cycles; exiting loop.", verbose)
-                break
 
     except asyncio.CancelledError:
         log("Cancelled.", True)
