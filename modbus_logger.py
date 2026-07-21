@@ -933,7 +933,7 @@ def normalize_modbus_address(address: Any, function: str, address_base: int = 0)
     address_base=0 (default, standard): 6-digit 400001 → PDU 0; small addrs used as-is.
     address_base=1 (1-based devices):   6-digit 400001 → PDU 1; small addr 1 → PDU 0.
 
-    Configure via "address_base" in config.json (top-level).
+    Configure via "address_base" inside the "connection" block in config.json.
     """
     addr = int(address)
     if addr <= 65535:
@@ -1128,7 +1128,6 @@ def main():
         print("Unable to connect to Modbus server.")
         sys.exit(1)
 
-    gen_unit = cfg.get("unit", 1)
     queries = cfg.get("queries", [])
     if not isinstance(queries, list) or len(queries) == 0:
         log("No queries defined in config.json", verbose)
