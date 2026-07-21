@@ -8,6 +8,7 @@ parses replies and stores results in SQLite using AsyncModbusTcpClient.
 Requires: pymodbus v3.x. Uses only standard library otherwise.
 """
 
+import argparse
 import asyncio
 import json
 import os
@@ -350,12 +351,23 @@ async def execute_query(
 
 async def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    cfg_path = os.path.join(base_dir, "config.json")
+
+    parser = argparse.ArgumentParser(description="Modbus async data logger")
+    parser.add_argument("--config", metavar="PATH",
+                        default=os.path.join(base_dir, "config.json"),
+                        help="path to config.json (default: <script dir>/config.json)")
+    parser.add_argument("-v", "--verbose", action="store_true", default=None,
+                        help="enable verbose output (overrides config)")
+    args = parser.parse_args()
+
+    cfg_path = args.config
     if not os.path.exists(cfg_path):
-        print("config.json not found in script directory.")
+        print(f"Config file not found: {cfg_path}")
         sys.exit(1)
 
     cfg = load_config(cfg_path)
+    if args.verbose:
+        cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
     address_base = int(cfg.get("connection", {}).get("address_base", 0))
 

@@ -9,6 +9,7 @@ Requires: pymodbus v3.x (already available). Uses only standard library otherwis
 Date: 2025-10-22
 """
 
+import argparse
 import json
 import os
 import sys
@@ -1141,12 +1142,23 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
 
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    cfg_path = os.path.join(base_dir, "config.json")
+
+    parser = argparse.ArgumentParser(description="Modbus data logger")
+    parser.add_argument("--config", metavar="PATH",
+                        default=os.path.join(base_dir, "config.json"),
+                        help="path to config.json (default: <script dir>/config.json)")
+    parser.add_argument("-v", "--verbose", action="store_true", default=None,
+                        help="enable verbose output (overrides config)")
+    args = parser.parse_args()
+
+    cfg_path = args.config
     if not os.path.exists(cfg_path):
-        print("config.json not found in script directory.")
+        print(f"Config file not found: {cfg_path}")
         sys.exit(1)
 
     cfg = load_config(cfg_path)
+    if args.verbose:
+        cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
 
     db_file = cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db"))
