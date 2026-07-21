@@ -1,6 +1,6 @@
 """
-Tests for ModbusClientWrapper methods implemented in 3.1.
-No pytest needed — run: py test_modbus_client.py
+Tests for ModbusClientWrapper methods and execute_query behaviour.
+No pytest needed — run: py test_modbus_logger.py
 """
 import sys
 import types
@@ -148,6 +148,79 @@ class TestCallMap(unittest.TestCase):
         for func in ("read_exception_status", "read_diagnostic_register",
                      "read_device_identification", "read_device_information"):
             self.assertIn(func, _STORE_FUNCS, f"{func} missing from _STORE_FUNCS")
+
+
+class TestExecuteQueryVerbose(unittest.TestCase):
+    """execute_query must respect the verbose flag captured at function entry."""
+
+    def _run_query(self, verbose: bool):
+        mock_client = MagicMock()
+        resp = MagicMock()
+        resp.isError.return_value = False
+        resp.registers = [42]
+        mock_client.read_holding_registers.return_value = resp
+
+        db = MagicMock()
+
+        cfg = {
+            "verbose": verbose,
+            "save_audit": False,
+        }
+        query = {
+            "name": "test_reg",
+            "function": "read_holding_registers",
+            "unit": 1,
+            "address": 0,
+            "count": 1,
+            "data_type": "uint16",
+            "endian": "Big",
+        }
+
+        wrapper = _make_wrapper(mock_client)
+
+        from modbus_logger import execute_query
+        import io
+        captured = io.StringIO()
+        import sys as _sys
+        old_stdout = _sys.stdout
+        _sys.stdout = captured
+        try:
+            execute_query(wrapper, db, query, cfg, address_base=0)
+        finally:
+            _sys.stdout = old_stdout
+        return captured.getvalue()
+
+    def test_verbose_true_produces_output(self):
+        output = self._run_query(verbose=True)
+        self.assertTrue(len(output) > 0, "verbose=True should produce log output")
+
+    def test_verbose_false_produces_no_output(self):
+        output = self._run_query(verbose=False)
+        self.assertEqual(output, "", "verbose=False must produce no output on success")
+
+    def test_failure_silent_when_not_verbose(self):
+        mock_client = MagicMock()
+        from pymodbus.pdu import ExceptionResponse
+        mock_client.read_holding_registers.return_value = ExceptionResponse(3, 2)
+
+        db = MagicMock()
+        cfg = {"verbose": False, "save_audit": False}
+        query = {"name": "t", "function": "read_holding_registers",
+                 "unit": 1, "address": 0, "count": 1}
+
+        wrapper = _make_wrapper(mock_client)
+
+        from modbus_logger import execute_query
+        import io, sys as _sys
+        captured = io.StringIO()
+        old_stdout = _sys.stdout
+        _sys.stdout = captured
+        try:
+            execute_query(wrapper, db, query, cfg, address_base=0)
+        finally:
+            _sys.stdout = old_stdout
+        self.assertEqual(captured.getvalue(), "",
+                         "verbose=False must suppress failure log too")
 
 
 if __name__ == "__main__":

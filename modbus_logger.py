@@ -416,13 +416,13 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
     if "address" in kw:
         kw["address"] = normalize_modbus_address(kw["address"], func, address_base)
 
-    if cfg.get("verbose", False):
-        log(f"Query -> name:{name} function:{func} unit:{unit} params:{kw} required args:{required_args}", True)
+    if verbose:
+        log(f"Query -> name:{name} function:{func} unit:{unit} params:{kw} required args:{required_args}", verbose)
 
     success, resp = getattr(client, method_name)(unit=unit, **kw)
 
     if not success:
-        log(f"Query '{name}' failed: {resp}", verbose=True)
+        log(f"Query '{name}' failed: {resp}", verbose)
         is_write = func.startswith("write")
         if cfg.get("save_audit", False) or is_write:
             db.insert_audit(serialized, is_write=is_write)
@@ -469,10 +469,7 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
             val_to_store = str(parsed_value)
         db.insert_data(table_name, val_to_store)
 
-    if cfg.get("verbose", False):
-        log(f"Response <- name:{name} parsed:{parsed_value}", True)
-    else:
-        log(f"Query '{name}' OK", True)
+    log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
 
 # ---------- Main loop ----------
 
