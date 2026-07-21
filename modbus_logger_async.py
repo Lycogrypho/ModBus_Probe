@@ -165,11 +165,11 @@ class ModbusLoggerAsync:
 
     def __init__(self, cfg: Dict[str, Any], verbose: bool = False):
         self.verbose = verbose
-        conn = cfg.get("connection", {})
+        self._conn = cfg.get("connection", {})
         self.client = AsyncModbusTcpClient(
-            host=conn.get("host", "127.0.0.1"),
-            port=int(conn.get("port", 502)),
-            timeout=conn.get("timeout", 5),
+            host=self._conn.get("host", "127.0.0.1"),
+            port=int(self._conn.get("port", 502)),
+            timeout=self._conn.get("timeout", 5),
         )
 
     async def connect(self) -> bool:
@@ -177,6 +177,39 @@ class ModbusLoggerAsync:
 
     async def close(self):
         self.client.close()
+
+    def is_connected(self) -> bool:
+        """Return True if the underlying TCP transport appears open."""
+        if hasattr(self.client, "is_socket_open"):
+            return self.client.is_socket_open()
+        if hasattr(self.client, "connected"):
+            return self.client.connected
+        return True
+
+    async def reconnect(self) -> bool:
+        """Re-establish connection with linear back-off. Returns True on success."""
+        retries = int(self._conn.get("reconnect_retries", 3))
+        delay = float(self._conn.get("reconnect_delay", 5))
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        for attempt in range(1, retries + 1):
+            log(f"Reconnect attempt {attempt}/{retries} (waiting {delay}s)...", self.verbose)
+            await asyncio.sleep(delay)
+            try:
+                self.client = AsyncModbusTcpClient(
+                    host=self._conn.get("host", "127.0.0.1"),
+                    port=int(self._conn.get("port", 502)),
+                    timeout=self._conn.get("timeout", 5),
+                )
+                if await self.client.connect():
+                    log("Reconnect successful.", self.verbose)
+                    return True
+            except Exception as e:
+                log(f"Reconnect attempt {attempt} raised: {e}", self.verbose)
+        log("All reconnect attempts failed.", self.verbose)
+        return False
 
     def _unwrap(self, resp):
         if resp is None:
@@ -353,6 +386,18 @@ async def main():
                 break
 
             log(f"Starting cycle {cycle_count}", verbose)
+
+            if not client.is_connected():
+                log("Connection lost — attempting reconnect...", True)
+                if not await client.reconnect():
+                    log("Reconnect failed; skipping cycle.", True)
+                    elapsed = time.monotonic() - cycle_start
+                    wait = t_cycle - elapsed
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    if num_cycles != 0 and cycle_count >= num_cycles:
+                        break
+                    continue
 
             for q in queries:
                 try:

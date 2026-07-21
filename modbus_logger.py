@@ -165,6 +165,35 @@ class ModbusClientWrapper:
         if self.client:
             self.client.close()
 
+    def is_connected(self) -> bool:
+        """Return True if the underlying transport appears open."""
+        if self.client is None:
+            return False
+        if hasattr(self.client, "is_socket_open"):
+            return self.client.is_socket_open()
+        return True  # serial: assume open if connect() succeeded
+
+    def reconnect(self) -> bool:
+        """Re-establish connection with linear back-off. Returns True on success."""
+        retries = int(self.cfg.get("reconnect_retries", 3))
+        delay = float(self.cfg.get("reconnect_delay", 5))
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        for attempt in range(1, retries + 1):
+            log(f"Reconnect attempt {attempt}/{retries} (waiting {delay}s)...", self.verbose)
+            time.sleep(delay)
+            try:
+                self._create_client()
+                if self.client.connect():
+                    log("Reconnect successful.", self.verbose)
+                    return True
+            except Exception as e:
+                log(f"Reconnect attempt {attempt} raised: {e}", self.verbose)
+        log("All reconnect attempts failed.", self.verbose)
+        return False
+
     # The following functions return a tuple: (success: bool, result_or_error)
     def read_coils(self, unit: int, address: int, count: int, **kwargs):
         r = self.client.read_coils(address=address, count=count, device_id=unit)
@@ -1149,6 +1178,18 @@ def main():
 
             if verbose:
                 log(f"Starting cycle {cycle_count}", True)
+
+            if not client.is_connected():
+                log("Connection lost — attempting reconnect...", True)
+                if not client.reconnect():
+                    log("Reconnect failed; skipping cycle.", True)
+                    elapsed = time.time() - cycle_start
+                    wait = t_cycle - elapsed
+                    if wait > 0:
+                        time.sleep(wait)
+                    if num_cycles != 0 and cycle_count >= num_cycles:
+                        break
+                    continue
 
             for q in queries:
                 try:
