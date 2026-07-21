@@ -223,6 +223,151 @@ class TestExecuteQueryVerbose(unittest.TestCase):
                          "verbose=False must suppress failure log too")
 
 
+class TestAdvancedDiagMethods(unittest.TestCase):
+    """All no-arg diag counter methods follow the same pattern; one test each."""
+
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.mock_client.is_socket_open.return_value = True
+        self.wrapper = _make_wrapper(self.mock_client)
+
+    def _ok(self):
+        r = MagicMock()
+        r.isError.return_value = False
+        return r
+
+    def _test_no_arg(self, method_name, client_attr=None):
+        client_attr = client_attr or method_name
+        getattr(self.mock_client, client_attr).return_value = self._ok()
+        ok, _ = getattr(self.wrapper, method_name)(unit=1)
+        self.assertTrue(ok)
+        getattr(self.mock_client, client_attr).assert_called_once_with(device_id=1)
+
+    def test_diag_force_listen_only(self):
+        self._test_no_arg("diag_force_listen_only")
+
+    def test_diag_clear_counters(self):
+        self._test_no_arg("diag_clear_counters")
+
+    def test_diag_read_bus_message_count(self):
+        self._test_no_arg("diag_read_bus_message_count")
+
+    def test_diag_read_bus_comm_error_count(self):
+        self._test_no_arg("diag_read_bus_comm_error_count")
+
+    def test_diag_read_bus_exception_error_count(self):
+        self._test_no_arg("diag_read_bus_exception_error_count")
+
+    def test_diag_read_device_message_count(self):
+        self._test_no_arg("diag_read_device_message_count")
+
+    def test_diag_read_device_no_response_count(self):
+        self._test_no_arg("diag_read_device_no_response_count")
+
+    def test_diag_read_device_nak_count(self):
+        self._test_no_arg("diag_read_device_nak_count")
+
+    def test_diag_read_device_busy_count(self):
+        self._test_no_arg("diag_read_device_busy_count")
+
+    def test_diag_read_bus_char_overrun_count(self):
+        self._test_no_arg("diag_read_bus_char_overrun_count")
+
+    def test_diag_read_iop_overrun_count(self):
+        self._test_no_arg("diag_read_iop_overrun_count")
+
+    def test_diag_clear_overrun_counter(self):
+        self._test_no_arg("diag_clear_overrun_counter")
+
+    def test_diag_getclear_modbus_response(self):
+        self._test_no_arg("diag_getclear_modbus_response")
+
+    def test_diag_get_comm_event_counter(self):
+        self._test_no_arg("diag_get_comm_event_counter")
+
+    def test_diag_get_comm_event_log(self):
+        self._test_no_arg("diag_get_comm_event_log")
+
+    def test_diag_change_ascii_input_delimeter(self):
+        self.mock_client.diag_change_ascii_input_delimeter.return_value = self._ok()
+        ok, _ = self.wrapper.diag_change_ascii_input_delimeter(unit=1, data=0x0D)
+        self.assertTrue(ok)
+        self.mock_client.diag_change_ascii_input_delimeter.assert_called_once_with(data=0x0D, device_id=1)
+
+    def test_read_fifo_queue(self):
+        self.mock_client.read_fifo_queue.return_value = self._ok()
+        ok, _ = self.wrapper.read_fifo_queue(unit=1, queue_register_address=100)
+        self.assertTrue(ok)
+        self.mock_client.read_fifo_queue.assert_called_once_with(address=100, device_id=1)
+
+    def test_read_file_record(self):
+        self.mock_client.read_file_record.return_value = self._ok()
+        ok, _ = self.wrapper.read_file_record(unit=1, file_record=[(4, 1, 2)])
+        self.assertTrue(ok)
+        self.mock_client.read_file_record.assert_called_once_with(file_record=[(4, 1, 2)], device_id=1)
+
+    def test_write_file_record(self):
+        self.mock_client.write_file_record.return_value = self._ok()
+        ok, _ = self.wrapper.write_file_record(unit=1, file_record=[(4, 1, [0x1234])])
+        self.assertTrue(ok)
+        self.mock_client.write_file_record.assert_called_once_with(file_record=[(4, 1, [0x1234])], device_id=1)
+
+    def test_readwrite_registers(self):
+        self.mock_client.readwrite_registers.return_value = self._ok()
+        ok, _ = self.wrapper.readwrite_registers(
+            unit=1, read_address=10, read_count=2, write_address=20, write_registers=[1, 2])
+        self.assertTrue(ok)
+        self.mock_client.readwrite_registers.assert_called_once_with(
+            read_address=10, read_count=2, write_address=20, write_registers=[1, 2], device_id=1)
+
+    def test_exception_propagated_as_false(self):
+        self.mock_client.diag_force_listen_only.side_effect = RuntimeError("no such function")
+        ok, msg = self.wrapper.diag_force_listen_only(unit=1)
+        self.assertFalse(ok)
+        self.assertIn("Exception", msg)
+
+
+class TestAdvancedCallMap(unittest.TestCase):
+    def test_all_advanced_functions_in_call_map(self):
+        from modbus_logger import _CALL_MAP
+        for func in (
+            "diag_force_listen_only", "diag_clear_counters",
+            "diag_read_bus_message_count", "diag_read_bus_comm_error_count",
+            "diag_read_bus_exception_error_count", "diag_read_device_message_count",
+            "diag_read_device_no_response_count", "diag_read_device_nak_count",
+            "diag_read_device_busy_count", "diag_read_bus_char_overrun_count",
+            "diag_read_iop_overrun_count", "diag_clear_overrun_counter",
+            "diag_getclear_modbus_response", "diag_get_comm_event_counter",
+            "diag_get_comm_event_log", "diag_change_ascii_input_delimeter",
+            "read_file_record", "write_file_record",
+            "readwrite_registers", "read_fifo_queue",
+        ):
+            self.assertIn(func, _CALL_MAP, f"{func} missing from _CALL_MAP")
+
+    def test_counter_funcs_in_store_funcs(self):
+        from modbus_logger import _STORE_FUNCS
+        for func in (
+            "diag_read_bus_message_count", "diag_read_bus_comm_error_count",
+            "diag_read_bus_exception_error_count", "diag_read_device_message_count",
+            "diag_read_device_no_response_count", "diag_read_device_nak_count",
+            "diag_read_device_busy_count", "diag_read_bus_char_overrun_count",
+            "diag_read_iop_overrun_count", "diag_get_comm_event_counter",
+            "diag_get_comm_event_log", "read_fifo_queue",
+            "readwrite_registers", "read_file_record",
+        ):
+            self.assertIn(func, _STORE_FUNCS, f"{func} missing from _STORE_FUNCS")
+
+    def test_readwrite_registers_required_args(self):
+        from modbus_logger import _CALL_MAP
+        _, args = _CALL_MAP["readwrite_registers"]
+        self.assertEqual(set(args), {"read_address", "read_count", "write_address", "write_registers"})
+
+    def test_read_fifo_queue_required_args(self):
+        from modbus_logger import _CALL_MAP
+        _, args = _CALL_MAP["read_fifo_queue"]
+        self.assertIn("queue_register_address", args)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))

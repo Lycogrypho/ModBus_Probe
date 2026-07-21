@@ -274,6 +274,131 @@ class ModbusLoggerAsync:
         except Exception as e:
             return False, f"Exception: {e}"
 
+    async def diag_force_listen_only(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_force_listen_only(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_clear_counters(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_clear_counters(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_bus_message_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_bus_message_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_bus_comm_error_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_bus_comm_error_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_bus_exception_error_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_bus_exception_error_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_device_message_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_device_message_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_device_no_response_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_device_no_response_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_device_nak_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_device_nak_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_device_busy_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_device_busy_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_bus_char_overrun_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_bus_char_overrun_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_read_iop_overrun_count(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_read_iop_overrun_count(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_clear_overrun_counter(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_clear_overrun_counter(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_getclear_modbus_response(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_getclear_modbus_response(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_get_comm_event_counter(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_get_comm_event_counter(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_get_comm_event_log(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_get_comm_event_log(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def read_fifo_queue(self, unit: int, queue_register_address: int, **_):
+        try:
+            return self._unwrap(await self.client.read_fifo_queue(address=queue_register_address, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def diag_change_ascii_input_delimeter(self, unit: int, data: int, **_):
+        try:
+            return self._unwrap(await self.client.diag_change_ascii_input_delimeter(data=data, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def read_file_record(self, unit: int, file_record, **_):
+        try:
+            return self._unwrap(await self.client.read_file_record(file_record=file_record, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def write_file_record(self, unit: int, file_record, **_):
+        try:
+            return self._unwrap(await self.client.write_file_record(file_record=file_record, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
+    async def readwrite_registers(self, unit: int, read_address: int, read_count: int,
+                                  write_address: int, write_registers: List[int], **_):
+        try:
+            return self._unwrap(await self.client.readwrite_registers(
+                read_address=read_address, read_count=read_count,
+                write_address=write_address, write_registers=write_registers,
+                device_id=unit,
+            ))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
     async def mask_write_register(self, unit: int, address: int, and_mask: int, or_mask: int, **_):
         try:
             return self._unwrap(await self.client.mask_write_register(address=address, and_mask=and_mask, or_mask=or_mask, device_id=unit))
@@ -283,27 +408,54 @@ class ModbusLoggerAsync:
 # ---------- Query execution ----------
 
 CALL_MAP = {
-    "read_coils":                  ("read_coils",                  ["address", "count"]),
-    "read_discrete_inputs":        ("read_discrete_inputs",        ["address", "count"]),
-    "read_holding_registers":      ("read_holding_registers",      ["address", "count"]),
-    "read_input_registers":        ("read_input_registers",        ["address", "count"]),
-    "write_coil":                  ("write_coil",                  ["address", "value"]),
-    "write_coils":                 ("write_coils",                 ["address", "values"]),
-    "write_single_register":       ("write_single_register",       ["address", "value"]),
-    "write_holding_registers":     ("write_holding_registers",     ["address", "values"]),
-    "read_exception_status":       ("read_exception_status",       []),
-    "read_diagnostic_register":    ("read_diagnostic_register",    []),
-    "diag_query_data":             ("diag_query_data",             ["msg"]),
-    "diag_restart_communication":  ("diag_restart_communication",  ["toggle"]),
-    "read_device_identification":  ("read_device_identification",  []),
-    "read_device_information":     ("read_device_information",     []),
-    "mask_write_register":         ("mask_write_register",         ["address", "and_mask", "or_mask"]),
+    "read_coils":                          ("read_coils",                          ["address", "count"]),
+    "read_discrete_inputs":                ("read_discrete_inputs",                ["address", "count"]),
+    "read_holding_registers":              ("read_holding_registers",              ["address", "count"]),
+    "read_input_registers":                ("read_input_registers",                ["address", "count"]),
+    "write_coil":                          ("write_coil",                          ["address", "value"]),
+    "write_coils":                         ("write_coils",                         ["address", "values"]),
+    "write_single_register":               ("write_single_register",               ["address", "value"]),
+    "write_holding_registers":             ("write_holding_registers",             ["address", "values"]),
+    "read_exception_status":               ("read_exception_status",               []),
+    "read_diagnostic_register":            ("read_diagnostic_register",            []),
+    "diag_query_data":                     ("diag_query_data",                     ["msg"]),
+    "diag_restart_communication":          ("diag_restart_communication",          ["toggle"]),
+    "diag_force_listen_only":              ("diag_force_listen_only",              []),
+    "diag_clear_counters":                 ("diag_clear_counters",                 []),
+    "diag_read_bus_message_count":         ("diag_read_bus_message_count",         []),
+    "diag_read_bus_comm_error_count":      ("diag_read_bus_comm_error_count",      []),
+    "diag_read_bus_exception_error_count": ("diag_read_bus_exception_error_count", []),
+    "diag_read_device_message_count":      ("diag_read_device_message_count",      []),
+    "diag_read_device_no_response_count":  ("diag_read_device_no_response_count",  []),
+    "diag_read_device_nak_count":          ("diag_read_device_nak_count",          []),
+    "diag_read_device_busy_count":         ("diag_read_device_busy_count",         []),
+    "diag_read_bus_char_overrun_count":    ("diag_read_bus_char_overrun_count",    []),
+    "diag_read_iop_overrun_count":         ("diag_read_iop_overrun_count",         []),
+    "diag_clear_overrun_counter":          ("diag_clear_overrun_counter",          []),
+    "diag_getclear_modbus_response":       ("diag_getclear_modbus_response",       []),
+    "diag_get_comm_event_counter":         ("diag_get_comm_event_counter",         []),
+    "diag_get_comm_event_log":             ("diag_get_comm_event_log",             []),
+    "diag_change_ascii_input_delimeter":   ("diag_change_ascii_input_delimeter",   ["data"]),
+    "read_file_record":                    ("read_file_record",                    ["file_record"]),
+    "write_file_record":                   ("write_file_record",                   ["file_record"]),
+    "readwrite_registers":                 ("readwrite_registers",                 ["read_address", "read_count", "write_address", "write_registers"]),
+    "read_fifo_queue":                     ("read_fifo_queue",                     ["queue_register_address"]),
+    "read_device_identification":          ("read_device_identification",          []),
+    "read_device_information":             ("read_device_information",             []),
+    "mask_write_register":                 ("mask_write_register",                 ["address", "and_mask", "or_mask"]),
 }
 
 STORE_FUNCS = frozenset({
     "read_coils", "read_discrete_inputs", "read_input_registers",
     "read_holding_registers", "read_exception_status", "read_diagnostic_register",
     "read_device_identification", "read_device_information",
+    "diag_read_bus_message_count", "diag_read_bus_comm_error_count",
+    "diag_read_bus_exception_error_count", "diag_read_device_message_count",
+    "diag_read_device_no_response_count", "diag_read_device_nak_count",
+    "diag_read_device_busy_count", "diag_read_bus_char_overrun_count",
+    "diag_read_iop_overrun_count", "diag_get_comm_event_counter",
+    "diag_get_comm_event_log", "read_fifo_queue",
+    "readwrite_registers", "read_file_record",
 })
 
 async def execute_query(
@@ -366,8 +518,16 @@ async def execute_query(
                 parsed_value = str(resp)
         elif func == "read_exception_status":
             parsed_value = getattr(resp, "status", str(resp))
-        elif func == "read_diagnostic_register":
+        elif func in ("read_diagnostic_register", "diag_read_bus_message_count",
+                      "diag_read_bus_comm_error_count", "diag_read_bus_exception_error_count",
+                      "diag_read_device_message_count", "diag_read_device_no_response_count",
+                      "diag_read_device_nak_count", "diag_read_device_busy_count",
+                      "diag_read_bus_char_overrun_count", "diag_read_iop_overrun_count",
+                      "diag_get_comm_event_counter"):
             parsed_value = getattr(resp, "registers", [str(resp)])[0] if hasattr(resp, "registers") else str(resp)
+        elif func in ("diag_get_comm_event_log", "read_file_record", "readwrite_registers",
+                      "read_fifo_queue"):
+            parsed_value = str(resp)
         else:
             parsed_value = str(resp)
     except Exception as e:

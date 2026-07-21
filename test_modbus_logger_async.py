@@ -128,6 +128,110 @@ class TestModbusLoggerAsync(unittest.TestCase):
                          "async CALL_MAP keys must match sync _CALL_MAP keys")
 
 
+class TestAsyncAdvancedDiagMethods(unittest.TestCase):
+    """All new async diag/file/register methods follow the same pattern."""
+
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.wrapper = _make_async_wrapper(self.mock_client)
+
+    def _ok(self):
+        r = MagicMock()
+        r.isError.return_value = False
+        return r
+
+    def _test_no_arg(self, method_name, client_attr=None):
+        client_attr = client_attr or method_name
+        getattr(self.mock_client, client_attr).return_value = self._ok()
+        setattr(self.mock_client, client_attr, AsyncMock(return_value=self._ok()))
+        ok, _ = _run(getattr(self.wrapper, method_name)(unit=1))
+        self.assertTrue(ok)
+        getattr(self.mock_client, client_attr).assert_called_once_with(device_id=1)
+
+    def test_diag_force_listen_only(self):
+        self._test_no_arg("diag_force_listen_only")
+
+    def test_diag_clear_counters(self):
+        self._test_no_arg("diag_clear_counters")
+
+    def test_diag_read_bus_message_count(self):
+        self._test_no_arg("diag_read_bus_message_count")
+
+    def test_diag_read_bus_comm_error_count(self):
+        self._test_no_arg("diag_read_bus_comm_error_count")
+
+    def test_diag_read_bus_exception_error_count(self):
+        self._test_no_arg("diag_read_bus_exception_error_count")
+
+    def test_diag_read_device_message_count(self):
+        self._test_no_arg("diag_read_device_message_count")
+
+    def test_diag_read_device_no_response_count(self):
+        self._test_no_arg("diag_read_device_no_response_count")
+
+    def test_diag_read_device_nak_count(self):
+        self._test_no_arg("diag_read_device_nak_count")
+
+    def test_diag_read_device_busy_count(self):
+        self._test_no_arg("diag_read_device_busy_count")
+
+    def test_diag_read_bus_char_overrun_count(self):
+        self._test_no_arg("diag_read_bus_char_overrun_count")
+
+    def test_diag_read_iop_overrun_count(self):
+        self._test_no_arg("diag_read_iop_overrun_count")
+
+    def test_diag_clear_overrun_counter(self):
+        self._test_no_arg("diag_clear_overrun_counter")
+
+    def test_diag_getclear_modbus_response(self):
+        self._test_no_arg("diag_getclear_modbus_response")
+
+    def test_diag_get_comm_event_counter(self):
+        self._test_no_arg("diag_get_comm_event_counter")
+
+    def test_diag_get_comm_event_log(self):
+        self._test_no_arg("diag_get_comm_event_log")
+
+    def test_diag_change_ascii_input_delimeter(self):
+        self.mock_client.diag_change_ascii_input_delimeter = AsyncMock(return_value=self._ok())
+        ok, _ = _run(self.wrapper.diag_change_ascii_input_delimeter(unit=1, data=0x0D))
+        self.assertTrue(ok)
+        self.mock_client.diag_change_ascii_input_delimeter.assert_called_once_with(data=0x0D, device_id=1)
+
+    def test_read_fifo_queue(self):
+        self.mock_client.read_fifo_queue = AsyncMock(return_value=self._ok())
+        ok, _ = _run(self.wrapper.read_fifo_queue(unit=1, queue_register_address=100))
+        self.assertTrue(ok)
+        self.mock_client.read_fifo_queue.assert_called_once_with(address=100, device_id=1)
+
+    def test_read_file_record(self):
+        self.mock_client.read_file_record = AsyncMock(return_value=self._ok())
+        ok, _ = _run(self.wrapper.read_file_record(unit=1, file_record=[(4, 1, 2)]))
+        self.assertTrue(ok)
+        self.mock_client.read_file_record.assert_called_once_with(file_record=[(4, 1, 2)], device_id=1)
+
+    def test_write_file_record(self):
+        self.mock_client.write_file_record = AsyncMock(return_value=self._ok())
+        ok, _ = _run(self.wrapper.write_file_record(unit=1, file_record=[(4, 1, [0x1234])]))
+        self.assertTrue(ok)
+        self.mock_client.write_file_record.assert_called_once_with(file_record=[(4, 1, [0x1234])], device_id=1)
+
+    def test_readwrite_registers(self):
+        self.mock_client.readwrite_registers = AsyncMock(return_value=self._ok())
+        ok, _ = _run(self.wrapper.readwrite_registers(
+            unit=1, read_address=10, read_count=2, write_address=20, write_registers=[1, 2]))
+        self.assertTrue(ok)
+        self.mock_client.readwrite_registers.assert_called_once_with(
+            read_address=10, read_count=2, write_address=20, write_registers=[1, 2], device_id=1)
+
+    def test_exception_propagated_as_false(self):
+        self.mock_client.diag_force_listen_only = AsyncMock(side_effect=RuntimeError("no such function"))
+        ok, msg = _run(self.wrapper.diag_force_listen_only(unit=1))
+        self.assertFalse(ok)
+        self.assertIn("Exception", msg)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))
