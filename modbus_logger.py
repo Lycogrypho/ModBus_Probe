@@ -983,6 +983,15 @@ def normalize_modbus_address(address: Any, function: str, address_base: int = 0)
 
 # ---------- Parsing utilities ----------
 
+_TYPE_ALIASES: Dict[str, str] = {
+    "REAL":  "float32",
+    "BOOL":  "bool",
+    "INT":   "int16",
+    "UINT":  "uint16",
+    "DINT":  "int32",
+    "UDINT": "uint32",
+}
+
 def parse_bits(bitlist: List[bool]) -> str:
     """Convert list of bools to compact string representation '0/1' CSV."""
     return ",".join("1" if b else "0" for b in bitlist)
@@ -996,15 +1005,7 @@ def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
     """
     if not registers:
         return None
-    # Map PLC-style names to internal names
-    data_type = {
-        "REAL":  "float32",
-        "BOOL":  "bool",
-        "INT":   "int16",
-        "UINT":  "uint16",
-        "DINT":  "int32",
-        "UDINT": "uint32",
-    }.get(data_type, data_type)
+    data_type = _TYPE_ALIASES.get(data_type, data_type)
     try:
         if endian == "Little":
             raw = b"".join(struct.pack("<H", r & 0xFFFF) for r in registers)
@@ -1034,6 +1035,17 @@ def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
 
 # ---------- Main execution logic ----------
 
+_CALL_MAP: Dict[str, tuple] = {
+    "read_coils":               ("read_coils",            ["address", "count"]),
+    "read_discrete_inputs":     ("read_discrete_inputs",  ["address", "count"]),
+    "read_holding_registers":   ("read_holding_registers",["address", "count"]),
+    "read_input_registers":     ("read_input_registers",  ["address", "count"]),
+    "write_single_register":    ("write_single_register", ["address", "value"]),
+    "write_holding_registers":  ("write_holding_registers",["address", "values"]),
+    "read_device_identification":("read_device_information", []),
+    "mask_write_register":      ("mask_write_register",   ["address", "and_mask", "or_mask"]),
+}
+
 def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, Any], cfg: Dict[str, Any]):
     """
     Execute single query dict. Query keys expected:
@@ -1050,23 +1062,11 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
     # Build a serialized representation for auditing
     serialized = json.dumps(query, ensure_ascii=False)
 
-    # Determine call and call args
-    call_map = {
-        "read_coils": ("read_coils", ["address", "count"]),
-        "read_discrete_inputs": ("read_discrete_inputs", ["address", "count"]),
-        "read_holding_registers": ("read_holding_registers", ["address", "count"]),
-        "read_input_registers": ("read_input_registers", ["address", "count"]),
-        "write_single_register": ("write_single_register", ["address", "value"]),
-        "write_holding_registers": ("write_holding_registers", ["address", "values"]),
-        "read_device_identification": ("read_device_information", []),
-        "mask_write_register": ("mask_write_register", ["address", "and_mask", "or_mask"]),
-    }
-
-    if func not in call_map:
+    if func not in _CALL_MAP:
         log(f"Unsupported function '{func}' in query '{name}'", verbose)
         return
 
-    method_name, required_args = call_map[func]
+    method_name, required_args = _CALL_MAP[func]
     kw = {}
     for arg in required_args:
         if arg not in query:
