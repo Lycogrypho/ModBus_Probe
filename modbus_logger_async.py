@@ -250,6 +250,30 @@ class ModbusLoggerAsync:
         except Exception as e:
             return False, f"Exception: {e}"
 
+    async def write_coil(self, unit: int, address: int, value: bool, **_):
+        return self._unwrap(await self.client.write_coil(address=address, value=value, device_id=unit))
+
+    async def write_coils(self, unit: int, address: int, values: List[bool], **_):
+        return self._unwrap(await self.client.write_coils(address=address, values=values, device_id=unit))
+
+    async def read_exception_status(self, unit: int, **_):
+        return self._unwrap(await self.client.read_exception_status(device_id=unit))
+
+    async def diag_query_data(self, unit: int, msg: bytes, **_):
+        return self._unwrap(await self.client.diag_query_data(msg=msg, device_id=unit))
+
+    async def diag_restart_communication(self, unit: int, toggle: bool, **_):
+        return self._unwrap(await self.client.diag_restart_communication(toggle=toggle, device_id=unit))
+
+    async def read_diagnostic_register(self, unit: int, **_):
+        return self._unwrap(await self.client.diag_read_diagnostic_register(device_id=unit))
+
+    async def read_device_identification(self, unit: int, **_):
+        try:
+            return self._unwrap(await self.client.report_device_id(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
+
     async def mask_write_register(self, unit: int, address: int, and_mask: int, or_mask: int, **_):
         try:
             return self._unwrap(await self.client.mask_write_register(address=address, and_mask=and_mask, or_mask=or_mask, device_id=unit))
@@ -259,19 +283,27 @@ class ModbusLoggerAsync:
 # ---------- Query execution ----------
 
 CALL_MAP = {
-    "read_coils":               ("read_coils",               ["address", "count"]),
-    "read_discrete_inputs":     ("read_discrete_inputs",     ["address", "count"]),
-    "read_holding_registers":   ("read_holding_registers",   ["address", "count"]),
-    "read_input_registers":     ("read_input_registers",     ["address", "count"]),
-    "write_single_register":    ("write_single_register",    ["address", "value"]),
-    "write_holding_registers":  ("write_holding_registers",  ["address", "values"]),
-    "read_device_identification": ("read_device_information", []),
-    "mask_write_register":      ("mask_write_register",      ["address", "and_mask", "or_mask"]),
+    "read_coils":                  ("read_coils",                  ["address", "count"]),
+    "read_discrete_inputs":        ("read_discrete_inputs",        ["address", "count"]),
+    "read_holding_registers":      ("read_holding_registers",      ["address", "count"]),
+    "read_input_registers":        ("read_input_registers",        ["address", "count"]),
+    "write_coil":                  ("write_coil",                  ["address", "value"]),
+    "write_coils":                 ("write_coils",                 ["address", "values"]),
+    "write_single_register":       ("write_single_register",       ["address", "value"]),
+    "write_holding_registers":     ("write_holding_registers",     ["address", "values"]),
+    "read_exception_status":       ("read_exception_status",       []),
+    "read_diagnostic_register":    ("read_diagnostic_register",    []),
+    "diag_query_data":             ("diag_query_data",             ["msg"]),
+    "diag_restart_communication":  ("diag_restart_communication",  ["toggle"]),
+    "read_device_identification":  ("read_device_identification",  []),
+    "read_device_information":     ("read_device_information",     []),
+    "mask_write_register":         ("mask_write_register",         ["address", "and_mask", "or_mask"]),
 }
 
 STORE_FUNCS = frozenset({
     "read_coils", "read_discrete_inputs", "read_input_registers",
-    "read_holding_registers", "read_device_identification",
+    "read_holding_registers", "read_exception_status", "read_diagnostic_register",
+    "read_device_identification", "read_device_information",
 })
 
 async def execute_query(
@@ -324,7 +356,7 @@ async def execute_query(
         elif func in ("read_holding_registers", "read_input_registers"):
             regs = getattr(resp, "registers", []) or []
             parsed_value = decode_registers(regs, query.get("data_type", "uint16"), query.get("endian", "Big"))
-        elif func == "read_device_identification":
+        elif func in ("read_device_identification", "read_device_information"):
             if hasattr(resp, "information"):
                 try:
                     parsed_value = {str(k): str(v) for k, v in resp.information.items()}
@@ -332,6 +364,10 @@ async def execute_query(
                     parsed_value = str(resp)
             else:
                 parsed_value = str(resp)
+        elif func == "read_exception_status":
+            parsed_value = getattr(resp, "status", str(resp))
+        elif func == "read_diagnostic_register":
+            parsed_value = getattr(resp, "registers", [str(resp)])[0] if hasattr(resp, "registers") else str(resp)
         else:
             parsed_value = str(resp)
     except Exception as e:
