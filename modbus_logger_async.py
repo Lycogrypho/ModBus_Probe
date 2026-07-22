@@ -20,9 +20,9 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    now_ts, log, load_config,
+    log, load_config,
     DBManager,
-    normalize_modbus_address, parse_bits, decode_registers, _TYPE_ALIASES,
+    normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
     parse_response, store_result,
 )
