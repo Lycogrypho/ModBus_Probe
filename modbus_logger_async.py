@@ -13,151 +13,24 @@ import asyncio
 import json
 import os
 import sys
-import sqlite3
-import struct
-import threading
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.pdu import ExceptionResponse
 
-# ---------- Utility helpers ----------
+from modbus_common import (
+    now_ts, log, load_config,
+    DBManager,
+    normalize_modbus_address, parse_bits, decode_registers, _TYPE_ALIASES,
+    _CALL_MAP, _STORE_FUNCS,
+    parse_response, store_result,
+)
 
-def now_ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+# Aliases matching the names used in existing tests for this module
+CALL_MAP = _CALL_MAP
+STORE_FUNCS = _STORE_FUNCS
 
-def log(msg: str, verbose: bool):
-    if verbose:
-        print(f"[{now_ts()}] {msg}")
-
-# ---------- Config ----------
-
-def load_config(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-    cfg.setdefault("verbose", False)
-    cfg.setdefault("timeout", 5)
-    cfg.setdefault("num_cycles", 0)
-    cfg.setdefault("t_cycle", 30)
-    cfg.setdefault("save_audit", False)
-    return cfg
-
-# ---------- SQLite ----------
-
-class DBManager:
-    def __init__(self, db_path: str, verbose: bool = False):
-        self.db_path = db_path
-        self.verbose = verbose
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
-        self.lock = threading.Lock()
-        self._ensure_audit_table()
-
-    def _ensure_audit_table(self):
-        with self.lock:
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS audit_trail (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ts TEXT NOT NULL,
-                    query TEXT NOT NULL,
-                    is_write INTEGER NOT NULL
-                )
-            """)
-            self.conn.commit()
-
-    def ensure_data_table(self, table_name: str) -> str:
-        safe = self._sanitize(table_name)
-        with self.lock:
-            self.conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {safe} (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ts TEXT NOT NULL,
-                    value TEXT
-                )
-            """)
-            self.conn.commit()
-        return safe
-
-    def insert_audit(self, query_serialized: str, is_write: bool):
-        with self.lock:
-            self.conn.execute(
-                "INSERT INTO audit_trail (ts, query, is_write) VALUES (?, ?, ?)",
-                (now_ts(), query_serialized, 1 if is_write else 0),
-            )
-            self.conn.commit()
-
-    def insert_data(self, table_name: str, value: str):
-        safe = self._sanitize(table_name)
-        with self.lock:
-            self.conn.execute(
-                f"INSERT INTO {safe} (ts, value) VALUES (?, ?)", (now_ts(), value)
-            )
-            self.conn.commit()
-
-    def _sanitize(self, name: str) -> str:
-        safe = "".join(c if (c.isalnum() or c == "_") else "_" for c in name)
-        if not safe:
-            safe = "table"
-        if safe[0].isdigit():
-            safe = "_" + safe
-        return safe
-
-    def close(self):
-        self.conn.close()
-
-# ---------- Address normalization ----------
-
-def normalize_modbus_address(address: Any, function: str, address_base: int = 0) -> int:
-    """Convert Modbus address to 0-indexed PDU address. address_base in connection block."""
-    addr = int(address)
-    if addr <= 65535:
-        return addr - address_base
-    offsets = {
-        "read_holding_registers":  400001,
-        "write_single_register":   400001,
-        "write_holding_registers": 400001,
-        "mask_write_register":     400001,
-        "read_input_registers":    300001,
-        "read_discrete_inputs":    100001,
-        "read_coils":              1,
-        "write_single_coil":       1,
-        "write_coils":             1,
-    }
-    return addr - offsets.get(function, 0) + address_base
-
-# ---------- Parsing ----------
-
-def parse_bits(bitlist: List[bool]) -> str:
-    return ",".join("1" if b else "0" for b in bitlist)
-
-def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
-    if not registers:
-        return None
-    data_type = {
-        "REAL": "float32", "BOOL": "bool", "INT": "int16", "UINT": "uint16",
-        "DINT": "int32", "UDINT": "uint32",
-    }.get(data_type, data_type)
-    try:
-        if endian == "Little":
-            raw = b"".join(struct.pack("<H", r & 0xFFFF) for r in registers)
-            bo = "<"
-        else:
-            raw = b"".join(struct.pack(">H", r & 0xFFFF) for r in registers)
-            bo = ">"
-        if data_type == "bool":    return bool(registers[0])
-        if data_type == "uint16":  return registers[0] & 0xFFFF
-        if data_type == "int16":   return struct.unpack(bo + "h", raw[:2])[0]
-        if data_type == "uint32":  return struct.unpack(bo + "I", raw[:4])[0]
-        if data_type == "int32":   return struct.unpack(bo + "i", raw[:4])[0]
-        if data_type == "float32": return struct.unpack(bo + "f", raw[:4])[0]
-        if data_type == "float64": return struct.unpack(bo + "d", raw[:8])[0]
-        if data_type == "hex":     return raw.hex()
-        return registers
-    except Exception:
-        return registers
 
 # ---------- Async Modbus client ----------
 
@@ -405,58 +278,8 @@ class ModbusLoggerAsync:
         except Exception as e:
             return False, f"Exception: {e}"
 
+
 # ---------- Query execution ----------
-
-CALL_MAP = {
-    "read_coils":                          ("read_coils",                          ["address", "count"]),
-    "read_discrete_inputs":                ("read_discrete_inputs",                ["address", "count"]),
-    "read_holding_registers":              ("read_holding_registers",              ["address", "count"]),
-    "read_input_registers":                ("read_input_registers",                ["address", "count"]),
-    "write_coil":                          ("write_coil",                          ["address", "value"]),
-    "write_coils":                         ("write_coils",                         ["address", "values"]),
-    "write_single_register":               ("write_single_register",               ["address", "value"]),
-    "write_holding_registers":             ("write_holding_registers",             ["address", "values"]),
-    "read_exception_status":               ("read_exception_status",               []),
-    "read_diagnostic_register":            ("read_diagnostic_register",            []),
-    "diag_query_data":                     ("diag_query_data",                     ["msg"]),
-    "diag_restart_communication":          ("diag_restart_communication",          ["toggle"]),
-    "diag_force_listen_only":              ("diag_force_listen_only",              []),
-    "diag_clear_counters":                 ("diag_clear_counters",                 []),
-    "diag_read_bus_message_count":         ("diag_read_bus_message_count",         []),
-    "diag_read_bus_comm_error_count":      ("diag_read_bus_comm_error_count",      []),
-    "diag_read_bus_exception_error_count": ("diag_read_bus_exception_error_count", []),
-    "diag_read_device_message_count":      ("diag_read_device_message_count",      []),
-    "diag_read_device_no_response_count":  ("diag_read_device_no_response_count",  []),
-    "diag_read_device_nak_count":          ("diag_read_device_nak_count",          []),
-    "diag_read_device_busy_count":         ("diag_read_device_busy_count",         []),
-    "diag_read_bus_char_overrun_count":    ("diag_read_bus_char_overrun_count",    []),
-    "diag_read_iop_overrun_count":         ("diag_read_iop_overrun_count",         []),
-    "diag_clear_overrun_counter":          ("diag_clear_overrun_counter",          []),
-    "diag_getclear_modbus_response":       ("diag_getclear_modbus_response",       []),
-    "diag_get_comm_event_counter":         ("diag_get_comm_event_counter",         []),
-    "diag_get_comm_event_log":             ("diag_get_comm_event_log",             []),
-    "diag_change_ascii_input_delimeter":   ("diag_change_ascii_input_delimeter",   ["data"]),
-    "read_file_record":                    ("read_file_record",                    ["file_record"]),
-    "write_file_record":                   ("write_file_record",                   ["file_record"]),
-    "readwrite_registers":                 ("readwrite_registers",                 ["read_address", "read_count", "write_address", "write_registers"]),
-    "read_fifo_queue":                     ("read_fifo_queue",                     ["queue_register_address"]),
-    "read_device_identification":          ("read_device_identification",          []),
-    "read_device_information":             ("read_device_information",             []),
-    "mask_write_register":                 ("mask_write_register",                 ["address", "and_mask", "or_mask"]),
-}
-
-STORE_FUNCS = frozenset({
-    "read_coils", "read_discrete_inputs", "read_input_registers",
-    "read_holding_registers", "read_exception_status", "read_diagnostic_register",
-    "read_device_identification", "read_device_information",
-    "diag_read_bus_message_count", "diag_read_bus_comm_error_count",
-    "diag_read_bus_exception_error_count", "diag_read_device_message_count",
-    "diag_read_device_no_response_count", "diag_read_device_nak_count",
-    "diag_read_device_busy_count", "diag_read_bus_char_overrun_count",
-    "diag_read_iop_overrun_count", "diag_get_comm_event_counter",
-    "diag_get_comm_event_log", "read_fifo_queue",
-    "readwrite_registers", "read_file_record",
-})
 
 async def execute_query(
     client: ModbusLoggerAsync,
@@ -471,11 +294,11 @@ async def execute_query(
     name = query.get("name", func)
     serialized = json.dumps(query, ensure_ascii=False)
 
-    if func not in CALL_MAP:
+    if func not in _CALL_MAP:
         log(f"Unsupported function '{func}' in query '{name}'", verbose)
         return
 
-    method_name, required_args = CALL_MAP[func]
+    method_name, required_args = _CALL_MAP[func]
     kw: Dict[str, Any] = {}
     for arg in required_args:
         if arg not in query:
@@ -500,47 +323,11 @@ async def execute_query(
     if is_write or cfg.get("save_audit", False):
         db.insert_audit(serialized, is_write=is_write)
 
-    parsed_value: Any = None
-    try:
-        if func in ("read_coils", "read_discrete_inputs"):
-            bits = getattr(resp, "bits", None) or getattr(resp, "bits_message", None)
-            parsed_value = parse_bits(bits if bits is not None else [])
-        elif func in ("read_holding_registers", "read_input_registers"):
-            regs = getattr(resp, "registers", []) or []
-            parsed_value = decode_registers(regs, query.get("data_type", "uint16"), query.get("endian", "Big"))
-        elif func in ("read_device_identification", "read_device_information"):
-            if hasattr(resp, "information"):
-                try:
-                    parsed_value = {str(k): str(v) for k, v in resp.information.items()}
-                except Exception:
-                    parsed_value = str(resp)
-            else:
-                parsed_value = str(resp)
-        elif func == "read_exception_status":
-            parsed_value = getattr(resp, "status", str(resp))
-        elif func in ("read_diagnostic_register", "diag_read_bus_message_count",
-                      "diag_read_bus_comm_error_count", "diag_read_bus_exception_error_count",
-                      "diag_read_device_message_count", "diag_read_device_no_response_count",
-                      "diag_read_device_nak_count", "diag_read_device_busy_count",
-                      "diag_read_bus_char_overrun_count", "diag_read_iop_overrun_count",
-                      "diag_get_comm_event_counter"):
-            parsed_value = getattr(resp, "registers", [str(resp)])[0] if hasattr(resp, "registers") else str(resp)
-        elif func in ("diag_get_comm_event_log", "read_file_record", "readwrite_registers",
-                      "read_fifo_queue"):
-            parsed_value = str(resp)
-        else:
-            parsed_value = str(resp)
-    except Exception as e:
-        parsed_value = f"Parse error: {e}"
-
-    if func in STORE_FUNCS:
-        try:
-            val = json.dumps(parsed_value, ensure_ascii=False) if not isinstance(parsed_value, (str, int, float, type(None))) else str(parsed_value)
-        except Exception:
-            val = str(parsed_value)
-        db.insert_data(name, val)
+    parsed_value = parse_response(func, resp, query)
+    store_result(db, name, func, parsed_value)
 
     log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
+
 
 # ---------- Main loop ----------
 
@@ -581,7 +368,7 @@ async def main():
         sys.exit(1)
 
     for q in queries:
-        if q.get("function") in STORE_FUNCS:
+        if q.get("function") in _STORE_FUNCS:
             db.ensure_data_table(q.get("name", q.get("function")))
 
     num_cycles = int(cfg.get("num_cycles", 0))
