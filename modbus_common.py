@@ -43,6 +43,38 @@ def load_config(path: str) -> Dict[str, Any]:
     return cfg
 
 
+def normalize_tasks(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Return a uniform list of task dicts from either config format.
+
+    New format  — cfg contains a "tasks" list, each item has "connection" and "queries".
+    Legacy format — cfg has top-level "connection" and "queries"; wrapped into one task.
+
+    Every task dict is guaranteed to have "name", "connection", and "queries" keys.
+    Global defaults (address_base etc.) already live inside each connection block.
+    """
+    if "tasks" in cfg:
+        tasks = cfg["tasks"]
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError("'tasks' must be a non-empty list")
+        result = []
+        for i, t in enumerate(tasks):
+            if not isinstance(t, dict):
+                raise ValueError(f"tasks[{i}] must be an object")
+            if "connection" not in t:
+                raise ValueError(f"tasks[{i}] missing 'connection'")
+            if "queries" not in t:
+                raise ValueError(f"tasks[{i}] missing 'queries'")
+            task = dict(t)
+            task.setdefault("name", f"task_{i}")
+            result.append(task)
+        return result
+    # Legacy: single connection + queries at top level
+    if "connection" not in cfg or "queries" not in cfg:
+        raise ValueError("Config must have either 'tasks' or both 'connection' and 'queries'")
+    return [{"name": "default", "connection": cfg["connection"], "queries": cfg["queries"]}]
+
+
 # ---------- SQLite ----------
 
 class DBManager:

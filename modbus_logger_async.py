@@ -20,7 +20,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config,
+    log, load_config, normalize_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -329,6 +329,27 @@ async def execute_query(
     log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
 
 
+# ---------- Per-task async runner ----------
+
+async def _run_task(task: Dict[str, Any], client: "ModbusLoggerAsync", db: DBManager,
+                    cfg: Dict[str, Any]) -> None:
+    """Run one full task (all its queries) for a single cycle iteration."""
+    verbose = cfg.get("verbose", False)
+    address_base = int(task["connection"].get("address_base", 0))
+
+    if not client.is_connected():
+        log(f"Task '{task['name']}': connection lost — reconnecting...", True)
+        if not await client.reconnect():
+            log(f"Task '{task['name']}': reconnect failed; skipping.", True)
+            return
+
+    for q in task["queries"]:
+        try:
+            await execute_query(client, db, q, cfg, address_base)
+        except Exception as e:
+            log(f"Exception in task '{task['name']}' query '{q.get('name', q.get('function'))}': {e}", verbose)
+
+
 # ---------- Main loop ----------
 
 async def main():
@@ -351,25 +372,34 @@ async def main():
     if args.verbose:
         cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
-    address_base = int(cfg.get("connection", {}).get("address_base", 0))
+
+    try:
+        tasks = normalize_tasks(cfg)
+    except ValueError as e:
+        print(f"Config error: {e}")
+        sys.exit(1)
 
     db = DBManager(cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db")), verbose=verbose)
-    client = ModbusLoggerAsync(cfg, verbose=verbose)
 
-    if not await client.connect():
-        print("Unable to connect to Modbus server.")
-        sys.exit(1)
+    # Create and connect one async client per task
+    clients: List[ModbusLoggerAsync] = []
+    for task in tasks:
+        # Inject the task's connection block so ModbusLoggerAsync can read it
+        task_cfg = {**cfg, "connection": task["connection"]}
+        client = ModbusLoggerAsync(task_cfg, verbose=verbose)
+        if not await client.connect():
+            print(f"Unable to connect for task '{task['name']}'.")
+            for c in clients:
+                await c.close()
+            db.close()
+            sys.exit(1)
+        clients.append(client)
 
-    queries = cfg.get("queries", [])
-    if not isinstance(queries, list) or not queries:
-        log("No queries defined in config.json", verbose)
-        await client.close()
-        db.close()
-        sys.exit(1)
-
-    for q in queries:
-        if q.get("function") in _STORE_FUNCS:
-            db.ensure_data_table(q.get("name", q.get("function")))
+    # Pre-create data tables for all tasks
+    for task in tasks:
+        for q in task["queries"]:
+            if q.get("function") in _STORE_FUNCS:
+                db.ensure_data_table(q.get("name", q.get("function")))
 
     num_cycles = int(cfg.get("num_cycles", 0))
     t_cycle = float(cfg.get("t_cycle", 30))
@@ -385,23 +415,11 @@ async def main():
 
             log(f"Starting cycle {cycle_count}", verbose)
 
-            if not client.is_connected():
-                log("Connection lost — attempting reconnect...", True)
-                if not await client.reconnect():
-                    log("Reconnect failed; skipping cycle.", True)
-                    elapsed = time.monotonic() - cycle_start
-                    wait = t_cycle - elapsed
-                    if wait > 0:
-                        await asyncio.sleep(wait)
-                    if num_cycles != 0 and cycle_count >= num_cycles:
-                        break
-                    continue
-
-            for q in queries:
-                try:
-                    await execute_query(client, db, q, cfg, address_base)
-                except Exception as e:
-                    log(f"Exception in query '{q.get('name', q.get('function'))}': {e}", verbose)
+            # Run all tasks concurrently within each cycle
+            await asyncio.gather(
+                *[_run_task(task, client, db, cfg) for task, client in zip(tasks, clients)],
+                return_exceptions=True,
+            )
 
             elapsed = time.monotonic() - cycle_start
             wait = t_cycle - elapsed
@@ -416,7 +434,8 @@ async def main():
     except KeyboardInterrupt:
         log("Interrupted by user.", True)
     finally:
-        await client.close()
+        for client in clients:
+            await client.close()
         db.close()
         log("Shutdown complete.", True)
 

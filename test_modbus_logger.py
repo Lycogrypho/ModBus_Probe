@@ -368,6 +368,48 @@ class TestAdvancedCallMap(unittest.TestCase):
         self.assertIn("queue_register_address", args)
 
 
+class TestMultiTaskDispatch(unittest.TestCase):
+    """execute_query is invoked once per query across multiple tasks."""
+
+    def _make_mock_client_with_registers(self, reg_value):
+        mock_client = MagicMock()
+        mock_client.is_socket_open.return_value = True
+        resp = MagicMock()
+        resp.isError.return_value = False
+        resp.registers = [reg_value]
+        mock_client.read_holding_registers.return_value = resp
+        return _make_wrapper(mock_client), mock_client
+
+    def test_two_tasks_each_query_executed(self):
+        from modbus_logger import execute_query
+        wrapper_a, mc_a = self._make_mock_client_with_registers(10)
+        wrapper_b, mc_b = self._make_mock_client_with_registers(20)
+        db = MagicMock()
+        cfg = {"verbose": False, "save_audit": False}
+        q = {"name": "reg", "function": "read_holding_registers",
+             "unit": 1, "address": 0, "count": 1, "data_type": "uint16", "endian": "Big"}
+
+        execute_query(wrapper_a, db, q, cfg, address_base=0)
+        execute_query(wrapper_b, db, q, cfg, address_base=0)
+
+        mc_a.read_holding_registers.assert_called_once()
+        mc_b.read_holding_registers.assert_called_once()
+        self.assertEqual(db.insert_data.call_count, 2)
+
+    def test_address_base_per_task(self):
+        from modbus_logger import execute_query
+        wrapper, mc = self._make_mock_client_with_registers(0)
+        db = MagicMock()
+        cfg = {"verbose": False, "save_audit": False}
+        q = {"name": "r", "function": "read_holding_registers",
+             "unit": 1, "address": 1, "count": 1}
+
+        # address_base=1 should subtract 1 from address 1 → PDU address 0
+        execute_query(wrapper, db, q, cfg, address_base=1)
+        mc.read_holding_registers.assert_called_once_with(
+            address=0, count=1, device_id=1, no_response_expected=False)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))

@@ -250,6 +250,99 @@ class TestDBManager(unittest.TestCase):
         db.close()
 
 
+# ---------- normalize_tasks ----------
+
+class TestNormalizeTasks(unittest.TestCase):
+    def setUp(self):
+        from modbus_common import normalize_tasks
+        self.nt = normalize_tasks
+
+    # --- legacy format ---
+
+    def test_legacy_single_connection(self):
+        cfg = {
+            "connection": {"host": "1.2.3.4", "port": 502},
+            "queries": [{"name": "q1", "function": "read_coils"}],
+        }
+        tasks = self.nt(cfg)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["name"], "default")
+        self.assertEqual(tasks[0]["connection"]["host"], "1.2.3.4")
+        self.assertEqual(tasks[0]["queries"][0]["name"], "q1")
+
+    def test_legacy_missing_queries_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"connection": {}})
+
+    def test_legacy_missing_connection_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"queries": []})
+
+    # --- new tasks format ---
+
+    def test_tasks_format_two_devices(self):
+        cfg = {
+            "tasks": [
+                {"name": "dev_A", "connection": {"host": "10.0.0.1"}, "queries": [{"name": "q1"}]},
+                {"name": "dev_B", "connection": {"host": "10.0.0.2"}, "queries": [{"name": "q2"}]},
+            ]
+        }
+        tasks = self.nt(cfg)
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0]["name"], "dev_A")
+        self.assertEqual(tasks[1]["name"], "dev_B")
+
+    def test_tasks_format_default_name_assigned(self):
+        cfg = {
+            "tasks": [
+                {"connection": {"host": "10.0.0.1"}, "queries": []},
+            ]
+        }
+        tasks = self.nt(cfg)
+        self.assertEqual(tasks[0]["name"], "task_0")
+
+    def test_tasks_empty_list_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"tasks": []})
+
+    def test_tasks_missing_connection_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"tasks": [{"queries": []}]})
+
+    def test_tasks_missing_queries_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"tasks": [{"connection": {}}]})
+
+    def test_tasks_non_dict_entry_raises(self):
+        with self.assertRaises(ValueError):
+            self.nt({"tasks": ["not_a_dict"]})
+
+    def test_tasks_format_preserves_connection_fields(self):
+        cfg = {
+            "tasks": [
+                {
+                    "name": "plc",
+                    "connection": {"host": "192.168.1.1", "port": 502, "address_base": 1},
+                    "queries": [],
+                }
+            ]
+        }
+        tasks = self.nt(cfg)
+        self.assertEqual(tasks[0]["connection"]["address_base"], 1)
+
+    # --- tasks key takes precedence over legacy keys ---
+
+    def test_tasks_key_wins_over_legacy(self):
+        cfg = {
+            "connection": {"host": "legacy"},
+            "queries": [],
+            "tasks": [{"name": "t", "connection": {"host": "new"}, "queries": []}],
+        }
+        tasks = self.nt(cfg)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["connection"]["host"], "new")
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))

@@ -22,7 +22,7 @@ from pymodbus.client.base import ModbusBaseClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config,
+    log, load_config, normalize_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -412,26 +412,33 @@ def main():
     if args.verbose:
         cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
-    address_base = int(cfg.get("connection", {}).get("address_base", 0))
+
+    try:
+        tasks = normalize_tasks(cfg)
+    except ValueError as e:
+        print(f"Config error: {e}")
+        sys.exit(1)
 
     db_file = cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db"))
     db = DBManager(db_file, verbose=verbose)
 
-    client = ModbusClientWrapper(cfg.get("connection", {}), verbose=verbose)
-    if not client.connect():
-        print("Unable to connect to Modbus server.")
-        sys.exit(1)
+    # Create and connect one client per task
+    clients: List[ModbusClientWrapper] = []
+    for task in tasks:
+        client = ModbusClientWrapper(task["connection"], verbose=verbose)
+        if not client.connect():
+            print(f"Unable to connect for task '{task['name']}'.")
+            for c in clients:
+                c.close()
+            db.close()
+            sys.exit(1)
+        clients.append(client)
 
-    queries = cfg.get("queries", [])
-    if not isinstance(queries, list) or len(queries) == 0:
-        log("No queries defined in config.json", verbose)
-        client.close()
-        db.close()
-        sys.exit(1)
-
-    for q in queries:
-        if q.get("function") in _STORE_FUNCS:
-            db.ensure_data_table(q.get("name", q.get("function")))
+    # Pre-create data tables for all tasks up front
+    for task in tasks:
+        for q in task["queries"]:
+            if q.get("function") in _STORE_FUNCS:
+                db.ensure_data_table(q.get("name", q.get("function")))
 
     num_cycles = int(cfg.get("num_cycles", 0))
     t_cycle = float(cfg.get("t_cycle", 30))
@@ -448,23 +455,20 @@ def main():
             if verbose:
                 log(f"Starting cycle {cycle_count}", True)
 
-            if not client.is_connected():
-                log("Connection lost — attempting reconnect...", True)
-                if not client.reconnect():
-                    log("Reconnect failed; skipping cycle.", True)
-                    elapsed = time.time() - cycle_start
-                    wait = t_cycle - elapsed
-                    if wait > 0:
-                        time.sleep(wait)
-                    if num_cycles != 0 and cycle_count >= num_cycles:
-                        break
-                    continue
+            for task, client in zip(tasks, clients):
+                address_base = int(task["connection"].get("address_base", 0))
 
-            for q in queries:
-                try:
-                    execute_query(client, db, q, cfg, address_base)
-                except Exception as e:
-                    log(f"Exception executing query '{q.get('name', q.get('function'))}': {e}", verbose)
+                if not client.is_connected():
+                    log(f"Task '{task['name']}': connection lost — reconnecting...", True)
+                    if not client.reconnect():
+                        log(f"Task '{task['name']}': reconnect failed; skipping.", True)
+                        continue
+
+                for q in task["queries"]:
+                    try:
+                        execute_query(client, db, q, cfg, address_base)
+                    except Exception as e:
+                        log(f"Exception in task '{task['name']}' query '{q.get('name', q.get('function'))}': {e}", verbose)
 
             elapsed = time.time() - cycle_start
             wait = t_cycle - elapsed
@@ -479,7 +483,8 @@ def main():
     except KeyboardInterrupt:
         log("Interrupted by user.", True)
     finally:
-        client.close()
+        for client in clients:
+            client.close()
         db.close()
         log("Shutdown complete.", True)
 

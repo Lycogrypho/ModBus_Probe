@@ -232,6 +232,47 @@ class TestAsyncAdvancedDiagMethods(unittest.TestCase):
         self.assertIn("Exception", msg)
 
 
+class TestAsyncMultiTaskDispatch(unittest.TestCase):
+    """Async execute_query is invoked once per query for each task."""
+
+    def _make_client_with_registers(self, reg_value):
+        mc = MagicMock()
+        resp = MagicMock()
+        resp.isError.return_value = False
+        resp.registers = [reg_value]
+        mc.read_holding_registers = AsyncMock(return_value=resp)
+        return _make_async_wrapper(mc), mc
+
+    def test_two_tasks_each_query_executed(self):
+        import modbus_logger_async as _mod
+        wrapper_a, mc_a = self._make_client_with_registers(10)
+        wrapper_b, mc_b = self._make_client_with_registers(20)
+        db = MagicMock()
+        cfg = {"verbose": False, "save_audit": False}
+        q = {"name": "reg", "function": "read_holding_registers",
+             "unit": 1, "address": 0, "count": 1, "data_type": "uint16", "endian": "Big"}
+
+        async def run():
+            await _mod.execute_query(wrapper_a, db, q, cfg, address_base=0)
+            await _mod.execute_query(wrapper_b, db, q, cfg, address_base=0)
+
+        _run(run())
+        mc_a.read_holding_registers.assert_called_once()
+        mc_b.read_holding_registers.assert_called_once()
+        self.assertEqual(db.insert_data.call_count, 2)
+
+    def test_address_base_per_task(self):
+        import modbus_logger_async as _mod
+        wrapper, mc = self._make_client_with_registers(0)
+        db = MagicMock()
+        cfg = {"verbose": False, "save_audit": False}
+        q = {"name": "r", "function": "read_holding_registers",
+             "unit": 1, "address": 1, "count": 1}
+
+        _run(_mod.execute_query(wrapper, db, q, cfg, address_base=1))
+        mc.read_holding_registers.assert_called_once_with(address=0, count=1, device_id=1)
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))
