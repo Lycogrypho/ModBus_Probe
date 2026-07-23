@@ -250,6 +250,137 @@ class TestDBManager(unittest.TestCase):
         db.close()
 
 
+# ---------- word_order / probe / raw_registers ----------
+
+class TestWordOrder(unittest.TestCase):
+    """2.10 — word_order parameter in decode_registers."""
+
+    def setUp(self):
+        from modbus_common import decode_registers
+        self.dr = decode_registers
+
+    # 1.0 in IEEE-754 big-endian = 0x3F800000
+    # Registers in ABCD layout: [0x3F80, 0x0000]
+    _ABCD = [0x3F80, 0x0000]
+    # CDAB: words swapped   → [0x0000, 0x3F80]
+    _CDAB = [0x0000, 0x3F80]
+    # BADC: bytes swapped within each word → [0x803F, 0x0000]
+    _BADC = [0x803F, 0x0000]
+    # DCBA: bytes swapped and words swapped → [0x0000, 0x803F]
+    _DCBA = [0x0000, 0x803F]
+
+    def test_abcd_float32(self):
+        self.assertAlmostEqual(self.dr(self._ABCD, "float32", "Big",    "Big"),    1.0, places=6)
+
+    def test_cdab_float32(self):
+        self.assertAlmostEqual(self.dr(self._CDAB, "float32", "Big",    "Little"), 1.0, places=6)
+
+    def test_badc_float32(self):
+        self.assertAlmostEqual(self.dr(self._BADC, "float32", "Little", "Big"),    1.0, places=6)
+
+    def test_dcba_float32(self):
+        self.assertAlmostEqual(self.dr(self._DCBA, "float32", "Little", "Little"), 1.0, places=6)
+
+    def test_default_word_order_is_big(self):
+        # Calling without word_order should behave as ABCD
+        self.assertAlmostEqual(self.dr(self._ABCD, "float32", "Big"), 1.0, places=6)
+
+    def test_word_order_little_reverses_registers_for_int32(self):
+        # 0x00010002 = 65538 in big-endian
+        # ABCD layout: [0x0001, 0x0002]
+        # CDAB layout: [0x0002, 0x0001]
+        self.assertEqual(self.dr([0x0001, 0x0002], "int32", "Big", "Big"),    65538)
+        self.assertEqual(self.dr([0x0002, 0x0001], "int32", "Big", "Little"), 65538)
+
+    def test_word_order_has_no_effect_on_single_register_types(self):
+        # uint16 and bool use only register[0]; word_order is irrelevant
+        self.assertEqual(self.dr([0x00FF], "uint16", "Big", "Big"),    255)
+        self.assertEqual(self.dr([0x00FF], "uint16", "Big", "Little"), 255)
+
+    def test_endian_little_int16_byte_swapped(self):
+        # Register 0x0100 with byte-swap (BADC-style single reg) → actual value 0x0001 = 1
+        self.assertEqual(self.dr([0x0100], "int16", "Little", "Big"), 1)
+
+
+class TestProbeDataType(unittest.TestCase):
+    """2.11 — probe pseudo-data-type returns all four layout interpretations."""
+
+    def setUp(self):
+        from modbus_common import decode_registers
+        self.dr = decode_registers
+
+    def test_probe_returns_dict(self):
+        result = self.dr([0x3F80, 0x0000], "probe")
+        self.assertIsInstance(result, dict)
+
+    def test_probe_contains_raw_hex(self):
+        result = self.dr([0x3F80, 0x0000], "probe")
+        self.assertIn("raw_hex", result)
+        self.assertEqual(result["raw_hex"], "3f800000")
+
+    def test_probe_contains_raw_registers(self):
+        result = self.dr([0x3F80, 0x0000], "probe")
+        self.assertEqual(result["raw_registers"], [0x3F80, 0x0000])
+
+    def test_probe_abcd_float32_correct(self):
+        result = self.dr([0x3F80, 0x0000], "probe")
+        self.assertAlmostEqual(result["ABCD_float32"], 1.0, places=6)
+
+    def test_probe_all_four_layouts_present(self):
+        result = self.dr([0x3F80, 0x0000], "probe")
+        for label in ("ABCD", "CDAB", "BADC", "DCBA"):
+            for typ in ("float32", "int32", "uint32"):
+                self.assertIn(f"{label}_{typ}", result, f"{label}_{typ} missing from probe")
+
+    def test_probe_via_parse_response(self):
+        from modbus_common import parse_response
+        resp = MagicMock()
+        resp.registers = [0x3F80, 0x0000]
+        result = parse_response("read_holding_registers", resp, {"data_type": "probe"})
+        self.assertIsInstance(result, dict)
+        self.assertAlmostEqual(result["ABCD_float32"], 1.0, places=6)
+
+    def test_probe_empty_registers_returns_none(self):
+        result = self.dr([], "probe")
+        self.assertIsNone(result)
+
+
+class TestRawRegistersDataType(unittest.TestCase):
+    """2.12 — raw_registers data type returns uint16 list before any decoding."""
+
+    def setUp(self):
+        from modbus_common import decode_registers
+        self.dr = decode_registers
+
+    def test_raw_registers_returns_list(self):
+        result = self.dr([0x3F80, 0x0000], "raw_registers")
+        self.assertEqual(result, [0x3F80, 0x0000])
+
+    def test_raw_registers_masks_to_uint16(self):
+        result = self.dr([0x1FFFF], "raw_registers")
+        self.assertEqual(result, [0xFFFF])
+
+    def test_raw_registers_single_register(self):
+        result = self.dr([42], "raw_registers")
+        self.assertEqual(result, [42])
+
+    def test_raw_registers_empty_returns_none(self):
+        result = self.dr([], "raw_registers")
+        self.assertIsNone(result)
+
+    def test_raw_registers_ignores_endian_and_word_order(self):
+        regs = [0x0001, 0x0002]
+        self.assertEqual(self.dr(regs, "raw_registers", "Big",    "Big"),    regs)
+        self.assertEqual(self.dr(regs, "raw_registers", "Little", "Little"), regs)
+
+    def test_raw_registers_via_parse_response(self):
+        from modbus_common import parse_response
+        resp = MagicMock()
+        resp.registers = [0xABCD, 0x1234]
+        result = parse_response("read_holding_registers", resp, {"data_type": "raw_registers"})
+        self.assertEqual(result, [0xABCD, 0x1234])
+
+
 # ---------- normalize_tasks ----------
 
 class TestNormalizeTasks(unittest.TestCase):

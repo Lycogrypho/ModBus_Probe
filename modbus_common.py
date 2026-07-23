@@ -184,35 +184,84 @@ def parse_bits(bitlist: List[bool]) -> str:
     return ",".join("1" if b else "0" for b in bitlist)
 
 
-def decode_registers(registers: List[int], data_type: str, endian: str) -> Any:
+def decode_registers(registers: List[int], data_type: str, endian: str = "Big",
+                     word_order: str = "Big") -> Any:
     """
     Decode registers (list of 16-bit ints) into a Python value.
 
+    endian ("Big" / "Little"): byte order within each 16-bit register.
+      "Big" = standard Modbus (high byte first).
+      "Little" = bytes are swapped within each register (BADC-style).
+    word_order ("Big" / "Little"): order of registers for multi-register types.
+      "Big" = high-word register first (default, ABCD).
+      "Little" = low-word register first (CDAB / DCBA).
+    Combined, the four standard layouts are:
+      ABCD  endian=Big    word_order=Big
+      CDAB  endian=Big    word_order=Little
+      BADC  endian=Little word_order=Big
+      DCBA  endian=Little word_order=Little
+    Special data_type values:
+      "raw_registers" — returns the uint16 register values as a list.
+      "probe"         — returns a dict of all four layout interpretations.
     Accepts PLC-style names (REAL, BOOL, INT, UINT, DINT, UDINT) and
-    low-level names (float32, int16, uint16, int32, uint32, float64, hex).
-    endian: "Big" or "Little"
+    low-level aliases (float32, int16, uint16, int32, uint32, float64, hex).
     """
     if not registers:
         return None
+
+    if data_type == "raw_registers":
+        return [r & 0xFFFF for r in registers]
+
+    if data_type == "probe":
+        return _probe_all_orderings(registers)
+
     data_type = _TYPE_ALIASES.get(data_type, data_type)
+
+    # Apply word order: reverse the register list so the high-word is always first.
+    regs = list(reversed(registers)) if word_order == "Little" else list(registers)
+
     try:
+        # Normalise to canonical big-endian bytes:
+        #   endian=Big    → pack ">H" (natural order, no change)
+        #   endian=Little → pack "<H" (un-swap bytes within each register)
+        # Always unpack with ">" so the final interpretation is consistent.
         if endian == "Little":
-            raw = b"".join(struct.pack("<H", r & 0xFFFF) for r in registers)
-            bo = "<"
+            raw = b"".join(struct.pack("<H", r & 0xFFFF) for r in regs)
         else:
-            raw = b"".join(struct.pack(">H", r & 0xFFFF) for r in registers)
-            bo = ">"
-        if data_type == "bool":    return bool(registers[0])
-        if data_type == "uint16":  return registers[0] & 0xFFFF
-        if data_type == "int16":   return struct.unpack(bo + "h", raw[:2])[0]
-        if data_type == "uint32":  return struct.unpack(bo + "I", raw[:4])[0]
-        if data_type == "int32":   return struct.unpack(bo + "i", raw[:4])[0]
-        if data_type == "float32": return struct.unpack(bo + "f", raw[:4])[0]
-        if data_type == "float64": return struct.unpack(bo + "d", raw[:8])[0]
+            raw = b"".join(struct.pack(">H", r & 0xFFFF) for r in regs)
+
+        if data_type == "bool":    return bool(regs[0])
+        if data_type == "uint16":  return regs[0] & 0xFFFF
+        if data_type == "int16":   return struct.unpack(">h", raw[:2])[0]
+        if data_type == "uint32":  return struct.unpack(">I", raw[:4])[0]
+        if data_type == "int32":   return struct.unpack(">i", raw[:4])[0]
+        if data_type == "float32": return struct.unpack(">f", raw[:4])[0]
+        if data_type == "float64": return struct.unpack(">d", raw[:8])[0]
         if data_type == "hex":     return raw.hex()
         return registers
     except Exception:
         return registers
+
+
+def _probe_all_orderings(registers: List[int]) -> Dict[str, Any]:
+    """Return all four byte/word-order interpretations of register data (for diagnostics)."""
+    raw_be = b"".join(struct.pack(">H", r & 0xFFFF) for r in registers)
+    result: Dict[str, Any] = {
+        "raw_hex": raw_be.hex(),
+        "raw_registers": [r & 0xFFFF for r in registers],
+    }
+    for label, endian, word_order in (
+        ("ABCD", "Big",    "Big"),
+        ("CDAB", "Big",    "Little"),
+        ("BADC", "Little", "Big"),
+        ("DCBA", "Little", "Little"),
+    ):
+        for typ in ("float32", "int32", "uint32"):
+            try:
+                result[f"{label}_{typ}"] = decode_registers(registers, typ, endian, word_order)
+            except Exception:
+                result[f"{label}_{typ}"] = None
+    return result
 
 
 # ---------- Dispatch tables ----------
@@ -281,7 +330,12 @@ def parse_response(func: str, resp: Any, query: Dict[str, Any]) -> Any:
             return parse_bits(bits if bits is not None else [])
         if func in ("read_holding_registers", "read_input_registers"):
             regs = getattr(resp, "registers", []) or []
-            return decode_registers(regs, query.get("data_type", "uint16"), query.get("endian", "Big"))
+            return decode_registers(
+                regs,
+                query.get("data_type", "uint16"),
+                query.get("endian", "Big"),
+                query.get("word_order", "Big"),
+            )
         if func in ("read_device_identification", "read_device_information"):
             if hasattr(resp, "information"):
                 try:
