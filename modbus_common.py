@@ -231,7 +231,7 @@ def decode_registers(registers: List[int], data_type: str, endian: str = "Big",
             raw = b"".join(struct.pack(">H", r & 0xFFFF) for r in regs)
 
         if data_type == "bool":    return bool(regs[0])
-        if data_type == "uint16":  return regs[0] & 0xFFFF
+        if data_type == "uint16":  return struct.unpack(">H", raw[:2])[0]
         if data_type == "int16":   return struct.unpack(">h", raw[:2])[0]
         if data_type == "uint32":  return struct.unpack(">I", raw[:4])[0]
         if data_type == "int32":   return struct.unpack(">i", raw[:4])[0]

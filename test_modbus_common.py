@@ -301,6 +301,16 @@ class TestWordOrder(unittest.TestCase):
         # Register 0x0100 with byte-swap (BADC-style single reg) → actual value 0x0001 = 1
         self.assertEqual(self.dr([0x0100], "int16", "Little", "Big"), 1)
 
+    def test_endian_little_uint16_byte_swapped(self):
+        # Regression: uint16 must use the byte-normalized raw, not regs[0] directly.
+        # Register 0x0100 big-endian = 256; byte-swapped (Little) = 0x0001 = 1.
+        self.assertEqual(self.dr([0x0100], "uint16", "Little", "Big"), 1)
+        self.assertEqual(self.dr([0x0100], "uint16", "Big",    "Big"), 256)
+
+    def test_endian_little_uint16_alias(self):
+        # UINT PLC alias must honour endian too.
+        self.assertEqual(self.dr([0x0100], "UINT", "Little"), 1)
+
 
 class TestProbeDataType(unittest.TestCase):
     """2.11 — probe pseudo-data-type returns all four layout interpretations."""
