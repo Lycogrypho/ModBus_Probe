@@ -12,8 +12,8 @@ def _make_async_wrapper(mock_client):
     """Return a ModbusLoggerAsync with a pre-injected mock async pymodbus client."""
     import modbus_logger_async as _mod
     with patch.object(_mod, "AsyncModbusTcpClient", return_value=mock_client):
-        cfg = {"connection": {"host": "127.0.0.1", "port": 502}}
-        wrapper = _mod.ModbusLoggerAsync(cfg, verbose=False)
+        conn = {"host": "127.0.0.1", "port": 502}
+        wrapper = _mod.ModbusLoggerAsync(conn, verbose=False)
         wrapper.client = mock_client
     return wrapper
 

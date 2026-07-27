@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
+# OopCompanion:suppressRename
+
+
 # ---------- Utility helpers ----------
 
 def now_ts() -> str:
@@ -75,8 +78,80 @@ def normalize_tasks(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [{"name": "default", "connection": cfg["connection"], "queries": cfg["queries"]}]
 
 
+def validate_tasks(tasks: List[Dict[str, Any]]) -> List[str]:
+    """
+    Semantic validation of a normalized task list (output of normalize_tasks).
+
+    Returns a list of human-readable error strings. An empty list means valid.
+    Call after normalize_tasks() and exit before connecting if non-empty.
+    """
+    errors: List[str] = []
+    seen_names: set = set()
+
+    for task in tasks:
+        tname = task.get("name", "unnamed")
+        conn = task.get("connection", {})
+
+        transport = conn.get("transport", "tcp")
+        if transport not in ("tcp", "serial"):
+            errors.append(
+                f"Task '{tname}': connection.transport must be 'tcp' or 'serial', got {transport!r}"
+            )
+
+        if transport == "tcp":
+            host = conn.get("host", "127.0.0.1")
+            if not isinstance(host, str) or not host:
+                errors.append(f"Task '{tname}': connection.host must be a non-empty string")
+            port = conn.get("port", 502)
+            try:
+                p = int(port)
+                if not (1 <= p <= 65535):
+                    errors.append(f"Task '{tname}': connection.port must be 1–65535, got {port!r}")
+            except (ValueError, TypeError):
+                errors.append(f"Task '{tname}': connection.port must be a number, got {port!r}")
+
+        timeout = conn.get("timeout", 5)
+        try:
+            if float(timeout) <= 0:
+                errors.append(f"Task '{tname}': connection.timeout must be positive, got {timeout!r}")
+        except (ValueError, TypeError):
+            errors.append(f"Task '{tname}': connection.timeout must be a number, got {timeout!r}")
+
+        queries = task.get("queries", [])
+        if not queries:
+            errors.append(f"Task '{tname}': 'queries' list must not be empty")
+
+        for q in queries:
+            qname = q.get("name", "")
+            if not qname:
+                errors.append(f"Task '{tname}': every query must have a non-empty 'name'")
+            elif qname in seen_names:
+                errors.append(
+                    f"Task '{tname}': duplicate query name {qname!r} — names must be unique across all tasks"
+                )
+            else:
+                seen_names.add(qname)
+
+            func = q.get("function", "")
+            if not func:
+                errors.append(f"Task '{tname}' query '{qname}': 'function' is required")
+                continue
+            if func not in _CALL_MAP:
+                errors.append(f"Task '{tname}' query '{qname}': unknown function {func!r}")
+                continue
+            _, required_args = _CALL_MAP[func]
+            for arg in required_args:
+                if arg not in q:
+                    errors.append(
+                        f"Task '{tname}' query '{qname}': function '{func}' requires argument '{arg}'"
+                    )
+
+    return errors
+
+
 # ---------- SQLite ----------
 
+# noinspection SqlNoDataSourceInspection
 class DBManager:
     """Manage SQLite connection and ensure required tables exist."""
 

@@ -22,7 +22,7 @@ from pymodbus.client.base import ModbusBaseClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config, normalize_tasks,
+    log, load_config, normalize_tasks, validate_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -107,57 +107,88 @@ class ModbusClientWrapper:
 
     # The following functions return a tuple: (success: bool, result_or_error)
     def read_coils(self, unit: int, address: int, count: int, **kwargs):
-        r = self.client.read_coils(address=address, count=count, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.read_coils(address=address, count=count, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def read_discrete_inputs(self, unit: int, address: int, count: int, **kwargs):
-        r = self.client.read_discrete_inputs(address=address, count=count, device_id=unit, no_response_expected=False)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.read_discrete_inputs(address=address, count=count, device_id=unit, no_response_expected=False)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def read_holding_registers(self, unit: int, address: int, count: int, **kwargs):
-        log("executing read_holding_registers", self.verbose)
-        r = self.client.read_holding_registers(address=int(address), count=int(count), device_id=unit, no_response_expected=False)
-
-        if not r.isError():
-            for i, value in enumerate(r.registers):
-                log(f"Register {address+i}: {value}", self.verbose)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.read_holding_registers(address=int(address), count=int(count), device_id=unit, no_response_expected=False)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def read_input_registers(self, unit: int, address: int, count: int, **kwargs):
-        r = self.client.read_input_registers(address=address, count=count, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.read_input_registers(address=address, count=count, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def write_coil(self, unit: int, address: int, value: bool, **kwargs):
-        r = self.client.write_coil(address=address, value=value, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.write_coil(address=address, value=value, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def write_coils(self, unit: int, address: int, values: List[bool], **kwargs):
-        r = self.client.write_coils(address=address, values=values, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.write_coils(address=address, values=values, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def write_single_register(self, unit: int, address: int, value: int, **kwargs):
-        r = self.client.write_register(address=address, value=value, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.write_register(address=address, value=value, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def write_holding_registers(self, unit: int, address: int, values: List[int], **kwargs):
-        r = self.client.write_registers(address=address, values=values, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.write_registers(address=address, values=values, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def read_exception_status(self, unit: int, **kwargs):
-        r = self.client.read_exception_status(device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.read_exception_status(device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def diag_query_data(self, unit: int, msg: bytes, **kwargs):
-        r = self.client.diag_query_data(msg=msg, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.diag_query_data(msg=msg, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def diag_restart_communication(self, unit: int, toggle: bool, **kwargs):
-        r = self.client.diag_restart_communication(toggle=toggle, device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.diag_restart_communication(toggle=toggle, device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def read_diagnostic_register(self, unit: int, **kwargs):
-        r = self.client.diag_read_diagnostic_register(device_id=unit)
-        return self._unwrap_response(r)
+        try:
+            r = self.client.diag_read_diagnostic_register(device_id=unit)
+            return self._unwrap_response(r)
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     def diag_force_listen_only(self, unit: int, **kwargs):
         try:
@@ -413,10 +444,17 @@ def main():
         cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
 
+    tasks = []
     try:
         tasks = normalize_tasks(cfg)
     except ValueError as e:
         print(f"Config error: {e}")
+        sys.exit(1)
+
+    errors = validate_tasks(tasks)
+    if errors:
+        for err in errors:
+            print(f"Config error: {err}")
         sys.exit(1)
 
     db_file = cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db"))

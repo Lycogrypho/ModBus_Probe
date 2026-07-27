@@ -20,7 +20,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config, normalize_tasks,
+    log, load_config, normalize_tasks, validate_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -37,9 +37,9 @@ STORE_FUNCS = _STORE_FUNCS
 class ModbusLoggerAsync:
     """Async Modbus client wrapper — async counterpart of ModbusClientWrapper."""
 
-    def __init__(self, cfg: Dict[str, Any], verbose: bool = False):
+    def __init__(self, conn: Dict[str, Any], verbose: bool = False):
         self.verbose = verbose
-        self._conn = cfg.get("connection", {})
+        self._conn = conn
         self.client = AsyncModbusTcpClient(
             host=self._conn.get("host", "127.0.0.1"),
             port=int(self._conn.get("port", 502)),
@@ -95,27 +95,40 @@ class ModbusLoggerAsync:
         return True, resp
 
     async def read_coils(self, unit: int, address: int, count: int, **_):
-        return self._unwrap(await self.client.read_coils(address=address, count=count, device_id=unit))
+        try:
+            return self._unwrap(await self.client.read_coils(address=address, count=count, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_discrete_inputs(self, unit: int, address: int, count: int, **_):
-        return self._unwrap(await self.client.read_discrete_inputs(address=address, count=count, device_id=unit))
+        try:
+            return self._unwrap(await self.client.read_discrete_inputs(address=address, count=count, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_holding_registers(self, unit: int, address: int, count: int, **_):
-        log("executing read_holding_registers", self.verbose)
-        r = await self.client.read_holding_registers(address=address, count=count, device_id=unit)
-        if not r.isError():
-            for i, value in enumerate(r.registers):
-                log(f"Register {address+i}: {value}", self.verbose)
-        return self._unwrap(r)
+        try:
+            return self._unwrap(await self.client.read_holding_registers(address=address, count=count, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_input_registers(self, unit: int, address: int, count: int, **_):
-        return self._unwrap(await self.client.read_input_registers(address=address, count=count, device_id=unit))
+        try:
+            return self._unwrap(await self.client.read_input_registers(address=address, count=count, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def write_single_register(self, unit: int, address: int, value: int, **_):
-        return self._unwrap(await self.client.write_register(address=address, value=value, device_id=unit))
+        try:
+            return self._unwrap(await self.client.write_register(address=address, value=value, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def write_holding_registers(self, unit: int, address: int, values: List[int], **_):
-        return self._unwrap(await self.client.write_registers(address=address, values=values, device_id=unit))
+        try:
+            return self._unwrap(await self.client.write_registers(address=address, values=values, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_device_information(self, unit: int, **_):
         try:
@@ -124,22 +137,40 @@ class ModbusLoggerAsync:
             return False, f"Exception: {e}"
 
     async def write_coil(self, unit: int, address: int, value: bool, **_):
-        return self._unwrap(await self.client.write_coil(address=address, value=value, device_id=unit))
+        try:
+            return self._unwrap(await self.client.write_coil(address=address, value=value, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def write_coils(self, unit: int, address: int, values: List[bool], **_):
-        return self._unwrap(await self.client.write_coils(address=address, values=values, device_id=unit))
+        try:
+            return self._unwrap(await self.client.write_coils(address=address, values=values, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_exception_status(self, unit: int, **_):
-        return self._unwrap(await self.client.read_exception_status(device_id=unit))
+        try:
+            return self._unwrap(await self.client.read_exception_status(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def diag_query_data(self, unit: int, msg: bytes, **_):
-        return self._unwrap(await self.client.diag_query_data(msg=msg, device_id=unit))
+        try:
+            return self._unwrap(await self.client.diag_query_data(msg=msg, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def diag_restart_communication(self, unit: int, toggle: bool, **_):
-        return self._unwrap(await self.client.diag_restart_communication(toggle=toggle, device_id=unit))
+        try:
+            return self._unwrap(await self.client.diag_restart_communication(toggle=toggle, device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_diagnostic_register(self, unit: int, **_):
-        return self._unwrap(await self.client.diag_read_diagnostic_register(device_id=unit))
+        try:
+            return self._unwrap(await self.client.diag_read_diagnostic_register(device_id=unit))
+        except Exception as e:
+            return False, f"Exception: {e}"
 
     async def read_device_identification(self, unit: int, **_):
         try:
@@ -373,10 +404,17 @@ async def main():
         cfg["verbose"] = True
     verbose = cfg.get("verbose", False)
 
+    tasks: List[Dict[str, Any]] = []
     try:
         tasks = normalize_tasks(cfg)
     except ValueError as e:
         print(f"Config error: {e}")
+        sys.exit(1)
+
+    errors = validate_tasks(tasks)
+    if errors:
+        for err in errors:
+            print(f"Config error: {err}")
         sys.exit(1)
 
     db = DBManager(cfg.get("db_file", os.path.join(base_dir, "modbus_logger.db")), verbose=verbose)
@@ -384,9 +422,7 @@ async def main():
     # Create and connect one async client per task
     clients: List[ModbusLoggerAsync] = []
     for task in tasks:
-        # Inject the task's connection block so ModbusLoggerAsync can read it
-        task_cfg = {**cfg, "connection": task["connection"]}
-        client = ModbusLoggerAsync(task_cfg, verbose=verbose)
+        client = ModbusLoggerAsync(task["connection"], verbose=verbose)
         if not await client.connect():
             print(f"Unable to connect for task '{task['name']}'.")
             for c in clients:
@@ -416,10 +452,13 @@ async def main():
             log(f"Starting cycle {cycle_count}", verbose)
 
             # Run all tasks concurrently within each cycle
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *[_run_task(task, client, db, cfg) for task, client in zip(tasks, clients)],
                 return_exceptions=True,
             )
+            for task, result in zip(tasks, results):
+                if isinstance(result, BaseException):
+                    log(f"Task '{task['name']}' raised an unexpected exception: {result}", True)
 
             elapsed = time.monotonic() - cycle_start
             wait = t_cycle - elapsed

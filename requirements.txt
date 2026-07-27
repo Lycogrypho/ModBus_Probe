@@ -1,5 +1,5 @@
 # Runtime dependency — requires pymodbus v3.x API (device_id= keyword)
-pymodbus>=3.0
+pymodbus>=3.0,<4
 
 # Build dependency (only needed to produce the Windows .exe)
 # pyinstaller
