@@ -26,7 +26,7 @@ from modbus_common import (
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
-    parse_response, store_result,
+    parse_response, store_result, multiview_decode,
 )
 
 
@@ -415,7 +415,12 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
     if is_write or cfg.get("save_audit", False):
         db.insert_audit(serialized, is_write=is_write)
 
-    parsed_value = parse_response(func, resp, query)
+    _MULTIVIEW_FUNCS = frozenset({"read_holding_registers", "read_input_registers"})
+    if cfg.get("multiview", False) and func in _MULTIVIEW_FUNCS:
+        regs = getattr(resp, "registers", []) or []
+        parsed_value = multiview_decode(regs, name, kw.get("address", 0))
+    else:
+        parsed_value = parse_response(func, resp, query)
     store_result(db, name, func, parsed_value)
 
     log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
@@ -432,6 +437,9 @@ def main():
                         help="path to config.json (default: <script dir>/config.json)")
     parser.add_argument("-v", "--verbose", action="store_true", default=None,
                         help="enable verbose output (overrides config)")
+    parser.add_argument("-m", "--multiview", action="store_true", default=False,
+                        help="store all register representations (binary, decimal, hex, float32, "
+                             "swapped float32, float64, swapped float64) instead of a single decoded value")
     args = parser.parse_args()
 
     cfg_path = args.config
@@ -442,6 +450,8 @@ def main():
     cfg = load_config(cfg_path)
     if args.verbose:
         cfg["verbose"] = True
+    if args.multiview:
+        cfg["multiview"] = True
     verbose = cfg.get("verbose", False)
 
     tasks = []

@@ -484,6 +484,114 @@ class TestNormalizeTasks(unittest.TestCase):
         self.assertEqual(tasks[0]["connection"]["host"], "new")
 
 
+# ---------- multiview_decode ----------
+
+class TestMultiviewDecode(unittest.TestCase):
+    """Tests for the -m / multiview_decode helper."""
+
+    def setUp(self):
+        from modbus_common import multiview_decode
+        self.mv = multiview_decode
+
+    # --- per-register fields ---
+
+    def test_binary_16_chars_per_register(self):
+        result = self.mv([0x3F80, 0x0000], "s", 100)
+        self.assertEqual(result["binary"], ["0011111110000000", "0000000000000000"])
+
+    def test_decimal_signed_int16(self):
+        # 0xFF00 as signed int16 = -256
+        result = self.mv([0xFF00], "s", 0)
+        self.assertEqual(result["decimal"], [-256])
+
+    def test_decimal_positive(self):
+        result = self.mv([0x0001], "s", 0)
+        self.assertEqual(result["decimal"], [1])
+
+    def test_hexadecimal_four_chars(self):
+        result = self.mv([0x3F80, 0x0000], "s", 0)
+        self.assertEqual(result["hexadecimal"], ["3f80", "0000"])
+
+    def test_name_and_address_in_result(self):
+        result = self.mv([0x0000], "temperature", 42)
+        self.assertEqual(result["name"], "temperature")
+        self.assertEqual(result["address"], 42)
+
+    # --- float32 ---
+
+    def test_float32_abcd_1_0(self):
+        # 1.0 in IEEE 754 ABCD = [0x3F80, 0x0000]
+        import struct
+        result = self.mv([0x3F80, 0x0000], "s", 0)
+        self.assertAlmostEqual(result["float32"], 1.0, places=6)
+
+    def test_float32_swapped_cdab_1_0(self):
+        # CDAB layout for 1.0: [0x0000, 0x3F80]
+        result = self.mv([0x0000, 0x3F80], "s", 0)
+        self.assertAlmostEqual(result["float32_swapped"], 1.0, places=6)
+
+    def test_float32_none_when_single_register(self):
+        result = self.mv([0x3F80], "s", 0)
+        self.assertIsNone(result["float32"])
+        self.assertIsNone(result["float32_swapped"])
+
+    # --- float64 ---
+
+    def test_float64_abcd_1_0(self):
+        # 1.0 in IEEE 754 double ABCDEFGH
+        import struct
+        raw = struct.pack(">d", 1.0)
+        regs = list(struct.unpack(">4H", raw))
+        result = self.mv(regs, "s", 0)
+        self.assertAlmostEqual(result["float64"], 1.0, places=12)
+
+    def test_float64_swapped_1_0(self):
+        import struct
+
+
+# OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
+        raw = struct.pack(">d", 1.0)
+        regs = list(struct.unpack(">4H", raw))
+        regs_swapped = list(reversed(regs))
+        result = self.mv(regs_swapped, "s", 0)
+        self.assertAlmostEqual(result["float64_swapped"], 1.0, places=12)
+
+    def test_float64_none_when_fewer_than_four_registers(self):
+        result = self.mv([0x3F80, 0x0000], "s", 0)
+        self.assertIsNone(result["float64"])
+        self.assertIsNone(result["float64_swapped"])
+
+    # --- high register values masked to uint16 ---
+
+    def test_high_register_values_masked(self):
+        result = self.mv([0x1FFFF], "s", 0)  # > 16 bits
+        self.assertEqual(result["binary"], ["1111111111111111"])
+        self.assertEqual(result["hexadecimal"], ["ffff"])
+
+    # --- all keys present ---
+
+    def test_all_keys_present_with_four_registers(self):
+        result = self.mv([0x3F80, 0x0000, 0x0000, 0x0000], "s", 0)
+        for key in ("name", "address", "binary", "decimal", "hexadecimal",
+                    "float32", "float32_swapped", "float64", "float64_swapped"):
+            self.assertIn(key, result, f"key '{key}' missing from multiview result")
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(__import__("__main__"))

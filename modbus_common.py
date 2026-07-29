@@ -339,6 +339,56 @@ def _probe_all_orderings(registers: List[int]) -> Dict[str, Any]:
     return result
 
 
+def multiview_decode(registers: List[int], name: str, address: int) -> Dict[str, Any]:
+    """
+    Return all standard Modbus register representations for multiview (-m) mode.
+
+    Per-register fields (one entry per register):
+      binary      — 16-character string of '0'/'1' (unsigned)
+      decimal     — signed int16 value (-32768 … 32767)
+      hexadecimal — 4-digit lowercase hex string
+
+    Multi-register fields (None when too few registers are available):
+      float32         — IEEE 754 single (ABCD, 2 registers)
+      float32_swapped — word-swapped single (CDAB, 2 registers)
+      float64         — IEEE 754 double  (ABCDEFGH, 4 registers)
+      float64_swapped — word-swapped double (GHEFCDAB, 4 registers)
+    """
+    regs = [r & 0xFFFF for r in registers]
+
+    result: Dict[str, Any] = {
+        "name":        name,
+        "address":     address,
+        "binary":      [f"{r:016b}" for r in regs],
+        "decimal":     [struct.unpack(">h", struct.pack(">H", r))[0] for r in regs],
+        "hexadecimal": [f"{r:04x}" for r in regs],
+    }
+
+    def _try_unpack(fmt: str, raw: bytes):
+        try:
+            return struct.unpack(fmt, raw)[0]
+        except Exception:
+            return None
+
+    if len(regs) >= 2:
+        raw2      = b"".join(struct.pack(">H", r) for r in regs[:2])
+        raw2_swap = b"".join(struct.pack(">H", r) for r in reversed(regs[:2]))
+        result["float32"]         = _try_unpack(">f", raw2)
+        result["float32_swapped"] = _try_unpack(">f", raw2_swap)
+    else:
+        result["float32"] = result["float32_swapped"] = None
+
+    if len(regs) >= 4:
+        raw4      = b"".join(struct.pack(">H", r) for r in regs[:4])
+        raw4_swap = b"".join(struct.pack(">H", r) for r in reversed(regs[:4]))
+        result["float64"]         = _try_unpack(">d", raw4)
+        result["float64_swapped"] = _try_unpack(">d", raw4_swap)
+    else:
+        result["float64"] = result["float64_swapped"] = None
+
+    return result
+
+
 # ---------- Dispatch tables ----------
 
 _CALL_MAP: Dict[str, tuple] = {
