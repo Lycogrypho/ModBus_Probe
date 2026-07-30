@@ -565,6 +565,9 @@ class TestMultiviewDecode(unittest.TestCase):
 
 
 # OopCompanion:suppressRename
+
+
+# OopCompanion:suppressRename
         raw = struct.pack(">d", 1.0)
         regs = list(struct.unpack(">4H", raw))
         regs_swapped = list(reversed(regs))
