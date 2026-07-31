@@ -55,10 +55,18 @@ function Write-Err([string]$msg) {
 # ---------------------------------------------------------------------------
 
 Write-Step "Checking PyInstaller"
-& py -m pip show pyinstaller 2>$null | Out-Null
+# When a venv is active its Scripts\ folder is prepended to PATH, so "python"
+# resolves to the venv interpreter.  Outside a venv we fall back to "py" (the
+# Windows Python Launcher) so the script also works without an active venv.
+$PY = if ($env:VIRTUAL_ENV) { "python" } else { "py" }
+$pyExe = (Get-Command $PY -ErrorAction SilentlyContinue).Source
+if (-not $pyExe) { Write-Err "$PY not found on PATH"; exit 1 }
+$venvLabel = if ($env:VIRTUAL_ENV) { " (venv: $env:VIRTUAL_ENV)" } else { " (system Python)" }
+Write-Host "    Using: $pyExe$venvLabel" -ForegroundColor Gray
+& $PY -m pip show pyinstaller 2>$null | Out-Null
 if (-not $?) {
     Write-Host "    PyInstaller not found - installing..." -ForegroundColor Yellow
-    & py -m pip install pyinstaller
+    & $PY -m pip install pyinstaller
     if (-not $?) { Write-Err "pip install pyinstaller failed"; exit 1 }
 }
 Write-Ok "PyInstaller available"
@@ -98,7 +106,7 @@ $CommonArgs = @(
 
 function Invoke-Build([string]$Script) {
     Write-Step "Building $Script"
-    & py -m PyInstaller @CommonArgs $Script
+    & $PY -m PyInstaller @CommonArgs $Script
     if ($LASTEXITCODE -ne 0) {
         Write-Err "PyInstaller failed for $Script (exit $LASTEXITCODE)"
         exit $LASTEXITCODE
