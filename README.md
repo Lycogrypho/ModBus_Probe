@@ -166,14 +166,23 @@ Deploy `dist/modbus_logger.exe` alongside `config.json`.
 
 ### Byte / word order
 
-For 32- and 64-bit types, use `endian` and `word_order` together to match the server's layout:
+For 32- and 64-bit types, use `endian` and `word_order` together to match the server's layout.
 
-| Layout | `endian` | `word_order` |
-|--------|----------|-------------|
-| ABCD (standard) | `"Big"` | `"Big"` |
-| CDAB | `"Big"` | `"Little"` |
-| BADC | `"Little"` | `"Big"` |
-| DCBA (full reverse) | `"Little"` | `"Little"` |
+**Workflow when the encoding is unknown:**
+1. Run with `-m` (multiview mode) — every register read stores all representations.
+2. Find the field whose value matches the expected physical value.
+3. Look up that field in the table below to get the correct `endian` / `word_order` pair.
+4. Set those values in `config.json` and remove `-m`.
+
+| Layout | `endian` | `word_order` | `-m` field that shows the correct value |
+|--------|----------|--------------|-----------------------------------------|
+| ABCD (standard) | `"Big"` | `"Big"` | `float32` / `float64` |
+| CDAB | `"Big"` | `"Little"` | `float32_swapped` / `float64_swapped` |
+| BADC | `"Little"` | `"Big"` | *(no direct multiview key — use `"data_type": "probe"`)* |
+| DCBA (full reverse) | `"Little"` | `"Little"` | *(no direct multiview key — use `"data_type": "probe"`)* |
+
+> **Note** — multiview covers the two most common layouts (ABCD and CDAB). BADC and DCBA are rare;
+> use `"data_type": "probe"` to diagnose them: it logs all four interpretations including `BADC_float32` and `DCBA_float32`.
 
 Use `"data_type": "probe"` to log all four interpretations simultaneously when the server's byte order is unknown.
 
