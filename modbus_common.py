@@ -348,11 +348,16 @@ def multiview_decode(registers: List[int], name: str, address: int) -> Dict[str,
       decimal     — signed int16 value (-32768 … 32767)
       hexadecimal — 4-digit lowercase hex string
 
-    Multi-register fields (None when too few registers are available):
-      float32         — IEEE 754 single (ABCD, 2 registers)
-      float32_swapped — word-swapped single (CDAB, 2 registers)
-      float64         — IEEE 754 double  (ABCDEFGH, 4 registers)
-      float64_swapped — word-swapped double (GHEFCDAB, 4 registers)
+    Multi-register float fields (None when too few registers are available).
+    Keys match the four standard Modbus byte/word-order layouts:
+      float32_abcd — endian=Big,    word_order=Big    (2 regs, standard)
+      float32_cdab — endian=Big,    word_order=Little (2 regs, word-swapped)
+      float32_badc — endian=Little, word_order=Big    (2 regs, byte-swapped)
+      float32_dcba — endian=Little, word_order=Little (2 regs, full reverse)
+      float64_abcd — same four layouts for 64-bit double (4 regs)
+      float64_cdab
+      float64_badc
+      float64_dcba
     """
     regs = [r & 0xFFFF for r in registers]
 
@@ -370,21 +375,28 @@ def multiview_decode(registers: List[int], name: str, address: int) -> Dict[str,
         except Exception:
             return None
 
+    def _raw(reg_slice, endian_char: str) -> bytes:
+        return b"".join(struct.pack(endian_char + "H", r) for r in reg_slice)
+
     if len(regs) >= 2:
-        raw2      = b"".join(struct.pack(">H", r) for r in regs[:2])
-        raw2_swap = b"".join(struct.pack(">H", r) for r in reversed(regs[:2]))
-        result["float32"]         = _try_unpack(">f", raw2)
-        result["float32_swapped"] = _try_unpack(">f", raw2_swap)
+        r2 = regs[:2]
+        result["float32_abcd"] = _try_unpack(">f", _raw(r2,          ">"))
+        result["float32_cdab"] = _try_unpack(">f", _raw(reversed(r2),">"))
+        result["float32_badc"] = _try_unpack(">f", _raw(r2,          "<"))
+        result["float32_dcba"] = _try_unpack(">f", _raw(reversed(r2),"<"))
     else:
-        result["float32"] = result["float32_swapped"] = None
+        result["float32_abcd"] = result["float32_cdab"] = None
+        result["float32_badc"] = result["float32_dcba"] = None
 
     if len(regs) >= 4:
-        raw4      = b"".join(struct.pack(">H", r) for r in regs[:4])
-        raw4_swap = b"".join(struct.pack(">H", r) for r in reversed(regs[:4]))
-        result["float64"]         = _try_unpack(">d", raw4)
-        result["float64_swapped"] = _try_unpack(">d", raw4_swap)
+        r4 = regs[:4]
+        result["float64_abcd"] = _try_unpack(">d", _raw(r4,          ">"))
+        result["float64_cdab"] = _try_unpack(">d", _raw(reversed(r4),">"))
+        result["float64_badc"] = _try_unpack(">d", _raw(r4,          "<"))
+        result["float64_dcba"] = _try_unpack(">d", _raw(reversed(r4),"<"))
     else:
-        result["float64"] = result["float64_swapped"] = None
+        result["float64_abcd"] = result["float64_cdab"] = None
+        result["float64_badc"] = result["float64_dcba"] = None
 
     return result
 

@@ -517,51 +517,57 @@ class TestMultiviewDecode(unittest.TestCase):
         self.assertEqual(result["name"], "temperature")
         self.assertEqual(result["address"], 42)
 
-    # --- float32 ---
+    # --- float32: all four layouts ---
+    # 1.0 in IEEE 754 single:
+    #   ABCD: bytes 3F 80 00 00 → registers [0x3F80, 0x0000]
+    #   CDAB: words swapped     → registers [0x0000, 0x3F80]
+    #   BADC: bytes swapped within each word → registers [0x803F, 0x0000]
+    #   DCBA: both swapped      → registers [0x0000, 0x803F]
 
-    def test_float32_abcd_1_0(self):
-        # 1.0 in IEEE 754 ABCD = [0x3F80, 0x0000]
-        import struct
-        result = self.mv([0x3F80, 0x0000], "s", 0)
-        self.assertAlmostEqual(result["float32"], 1.0, places=6)
+    def test_float32_abcd(self):
+        self.assertAlmostEqual(self.mv([0x3F80, 0x0000], "s", 0)["float32_abcd"], 1.0, places=6)
 
-    def test_float32_swapped_cdab_1_0(self):
-        # CDAB layout for 1.0: [0x0000, 0x3F80]
-        result = self.mv([0x0000, 0x3F80], "s", 0)
-        self.assertAlmostEqual(result["float32_swapped"], 1.0, places=6)
+    def test_float32_cdab(self):
+        self.assertAlmostEqual(self.mv([0x0000, 0x3F80], "s", 0)["float32_cdab"], 1.0, places=6)
+
+    def test_float32_badc(self):
+        self.assertAlmostEqual(self.mv([0x803F, 0x0000], "s", 0)["float32_badc"], 1.0, places=6)
+
+    def test_float32_dcba(self):
+        self.assertAlmostEqual(self.mv([0x0000, 0x803F], "s", 0)["float32_dcba"], 1.0, places=6)
 
     def test_float32_none_when_single_register(self):
         result = self.mv([0x3F80], "s", 0)
-        self.assertIsNone(result["float32"])
-        self.assertIsNone(result["float32_swapped"])
+        for key in ("float32_abcd", "float32_cdab", "float32_badc", "float32_dcba"):
+            self.assertIsNone(result[key], f"{key} should be None with 1 register")
 
-    # --- float64 ---
+    # --- float64: all four layouts ---
+    # 1.0 in IEEE 754 double = 3FF0 0000 0000 0000
+    #   ABCD: registers [0x3FF0, 0x0000, 0x0000, 0x0000]
+    #   CDAB: word-reversed    [0x0000, 0x0000, 0x0000, 0x3FF0]
+    #   BADC: byte-swapped     [0xF03F, 0x0000, 0x0000, 0x0000]
+    #   DCBA: both             [0x0000, 0x0000, 0x0000, 0xF03F]
 
-    def test_float64_abcd_1_0(self):
-        # 1.0 in IEEE 754 double ABCDEFGH
-        import struct
-        raw = struct.pack(">d", 1.0)
-        regs = list(struct.unpack(">4H", raw))
-        result = self.mv(regs, "s", 0)
-        self.assertAlmostEqual(result["float64"], 1.0, places=12)
+    def test_float64_abcd(self):
+        self.assertAlmostEqual(
+            self.mv([0x3FF0, 0x0000, 0x0000, 0x0000], "s", 0)["float64_abcd"], 1.0, places=12)
 
-    def test_float64_swapped_1_0(self):
-        import struct
+    def test_float64_cdab(self):
+        self.assertAlmostEqual(
+            self.mv([0x0000, 0x0000, 0x0000, 0x3FF0], "s", 0)["float64_cdab"], 1.0, places=12)
 
+    def test_float64_badc(self):
+        self.assertAlmostEqual(
+            self.mv([0xF03F, 0x0000, 0x0000, 0x0000], "s", 0)["float64_badc"], 1.0, places=12)
 
-# OopCompanion:suppressRename
-
-# OopCompanion:suppressRename
-        raw = struct.pack(">d", 1.0)
-        regs = list(struct.unpack(">4H", raw))
-        regs_swapped = list(reversed(regs))
-        result = self.mv(regs_swapped, "s", 0)
-        self.assertAlmostEqual(result["float64_swapped"], 1.0, places=12)
+    def test_float64_dcba(self):
+        self.assertAlmostEqual(
+            self.mv([0x0000, 0x0000, 0x0000, 0xF03F], "s", 0)["float64_dcba"], 1.0, places=12)
 
     def test_float64_none_when_fewer_than_four_registers(self):
         result = self.mv([0x3F80, 0x0000], "s", 0)
-        self.assertIsNone(result["float64"])
-        self.assertIsNone(result["float64_swapped"])
+        for key in ("float64_abcd", "float64_cdab", "float64_badc", "float64_dcba"):
+            self.assertIsNone(result[key], f"{key} should be None with 2 registers")
 
     # --- high register values masked to uint16 ---
 
@@ -575,7 +581,8 @@ class TestMultiviewDecode(unittest.TestCase):
     def test_all_keys_present_with_four_registers(self):
         result = self.mv([0x3F80, 0x0000, 0x0000, 0x0000], "s", 0)
         for key in ("name", "address", "binary", "decimal", "hexadecimal",
-                    "float32", "float32_swapped", "float64", "float64_swapped"):
+                    "float32_abcd", "float32_cdab", "float32_badc", "float32_dcba",
+                    "float64_abcd", "float64_cdab", "float64_badc", "float64_dcba"):
             self.assertIn(key, result, f"key '{key}' missing from multiview result")
 
 

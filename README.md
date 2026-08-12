@@ -174,15 +174,12 @@ For 32- and 64-bit types, use `endian` and `word_order` together to match the se
 3. Look up that field in the table below to get the correct `endian` / `word_order` pair.
 4. Set those values in `config.json` and remove `-m`.
 
-| Layout | `endian` | `word_order` | `-m` field that shows the correct value |
-|--------|----------|--------------|-----------------------------------------|
-| ABCD (standard) | `"Big"` | `"Big"` | `float32` / `float64` |
-| CDAB | `"Big"` | `"Little"` | `float32_swapped` / `float64_swapped` |
-| BADC | `"Little"` | `"Big"` | *(no direct multiview key — use `"data_type": "probe"`)* |
-| DCBA (full reverse) | `"Little"` | `"Little"` | *(no direct multiview key — use `"data_type": "probe"`)* |
-
-> **Note** — multiview covers the two most common layouts (ABCD and CDAB). BADC and DCBA are rare;
-> use `"data_type": "probe"` to diagnose them: it logs all four interpretations including `BADC_float32` and `DCBA_float32`.
+| Layout | `endian` | `word_order` | `-m` field (32-bit) | `-m` field (64-bit) |
+|--------|----------|--------------|---------------------|---------------------|
+| ABCD (standard) | `"Big"` | `"Big"` | `float32_abcd` | `float64_abcd` |
+| CDAB | `"Big"` | `"Little"` | `float32_cdab` | `float64_cdab` |
+| BADC | `"Little"` | `"Big"` | `float32_badc` | `float64_badc` |
+| DCBA (full reverse) | `"Little"` | `"Little"` | `float32_dcba` | `float64_dcba` |
 
 Use `"data_type": "probe"` to log all four interpretations simultaneously when the server's byte order is unknown.
 
