@@ -1,8 +1,4 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
-
-hiddenimports = ['sqlite3']
-hiddenimports += collect_submodules('pymodbus')
 
 
 a = Analysis(
@@ -10,7 +6,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=hiddenimports,
+    hiddenimports=['sqlite3'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

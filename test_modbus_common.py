@@ -311,6 +311,16 @@ class TestWordOrder(unittest.TestCase):
         # UINT PLC alias must honour endian too.
         self.assertEqual(self.dr([0x0100], "UINT", "Little"), 1)
 
+    def test_endian_and_word_order_case_insensitive(self):
+        # "big", "BIG", "Big" must all behave identically.
+        for endian_v in ("big", "BIG", "Big"):
+            for wo_v in ("little", "LITTLE", "Little"):
+                with self.subTest(endian=endian_v, word_order=wo_v):
+                    self.assertAlmostEqual(
+                        self.dr(self._CDAB, "float32", endian_v, wo_v), 1.0, places=6,
+                        msg=f"endian={endian_v!r} word_order={wo_v!r} should decode CDAB float32 as 1.0"
+                    )
+
 
 class TestProbeDataType(unittest.TestCase):
     """2.11 — probe pseudo-data-type returns all four layout interpretations."""
@@ -584,6 +594,53 @@ class TestMultiviewDecode(unittest.TestCase):
                     "float32_abcd", "float32_cdab", "float32_badc", "float32_dcba",
                     "float64_abcd", "float64_cdab", "float64_badc", "float64_dcba"):
             self.assertIn(key, result, f"key '{key}' missing from multiview result")
+
+
+class TestDecodeConsistency(unittest.TestCase):
+    """Verify decode_registers and multiview_decode produce identical results for all layouts."""
+
+    def setUp(self):
+        from modbus_common import decode_registers, multiview_decode
+        self.decode = decode_registers
+        self.multiview = multiview_decode
+
+    # 1.0 in IEEE 754 float32 = 0x3F800000; registers per layout:
+    _FLOAT32_CASES = [
+        ("abcd", [0x3F80, 0x0000], "Big",    "Big"),
+        ("cdab", [0x0000, 0x3F80], "Big",    "Little"),
+        ("badc", [0x803F, 0x0000], "Little", "Big"),
+        ("dcba", [0x0000, 0x803F], "Little", "Little"),
+    ]
+
+    # 1.0 in IEEE 754 float64 = 0x3FF0000000000000; registers per layout:
+    _FLOAT64_CASES = [
+        ("abcd", [0x3FF0, 0x0000, 0x0000, 0x0000], "Big",    "Big"),
+        ("cdab", [0x0000, 0x0000, 0x0000, 0x3FF0], "Big",    "Little"),
+        ("badc", [0xF03F, 0x0000, 0x0000, 0x0000], "Little", "Big"),
+        ("dcba", [0x0000, 0x0000, 0x0000, 0xF03F], "Little", "Little"),
+    ]
+
+    def test_float32_layouts_match(self):
+        for layout, regs, endian, word_order in self._FLOAT32_CASES:
+            with self.subTest(layout=layout):
+                normal = self.decode(regs, "float32", endian, word_order)
+                mv_key = f"float32_{layout}"
+                mv = self.multiview(regs, "s", 0)[mv_key]
+                self.assertAlmostEqual(
+                    normal, mv, places=6,
+                    msg=f"decode_registers vs multiview_decode[{mv_key}] differ: {normal!r} != {mv!r}"
+                )
+
+    def test_float64_layouts_match(self):
+        for layout, regs, endian, word_order in self._FLOAT64_CASES:
+            with self.subTest(layout=layout):
+                normal = self.decode(regs, "float64", endian, word_order)
+                mv_key = f"float64_{layout}"
+                mv = self.multiview(regs, "s", 0)[mv_key]
+                self.assertAlmostEqual(
+                    normal, mv, places=12,
+                    msg=f"decode_registers vs multiview_decode[{mv_key}] differ: {normal!r} != {mv!r}"
+                )
 
 
 if __name__ == "__main__":

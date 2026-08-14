@@ -291,6 +291,8 @@ def decode_registers(registers: List[int], data_type: str, endian: str = "Big",
         return _probe_all_orderings(registers)
 
     data_type = _TYPE_ALIASES.get(data_type, data_type)
+    endian = endian.capitalize()
+    word_order = word_order.capitalize()
 
     # Apply word order: reverse the register list so the high-word is always first.
     regs = list(reversed(registers)) if word_order == "Little" else list(registers)
