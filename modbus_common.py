@@ -27,7 +27,6 @@ from typing import Any, Dict, List
 def now_ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
 def log(msg: str, verbose: bool):
     if verbose:
         print(f"[{now_ts()}] {msg}")
@@ -182,6 +181,7 @@ class DBManager:
             self.conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {safe} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ref_ts TEXT NOT NULL,
                     ts TEXT NOT NULL,
                     value TEXT
                 )
@@ -197,11 +197,11 @@ class DBManager:
             )
             self.conn.commit()
 
-    def insert_data(self, table_name: str, value: str):
+    def insert_data(self, table_name: str, value: str, ref_time_stamp):
         safe = self._sanitize_table(table_name)
         with self.lock:
             self.conn.execute(
-                f"INSERT INTO {safe} (ts, value) VALUES (?, ?)", (now_ts(), value)
+                f"INSERT INTO {safe} (ref_ts, ts, value) VALUES (?, ?, ?)", (ref_time_stamp, now_ts(), value)
             )
             self.conn.commit()
 
@@ -500,7 +500,7 @@ def parse_response(func: str, resp: Any, query: Dict[str, Any]) -> Any:
         return f"Parse error: {e}"
 
 
-def store_result(db: DBManager, name: str, func: str, parsed_value: Any) -> None:
+def store_result(db: DBManager, name: str, func: str, parsed_value: Any, ref_time_stamp) -> None:
     """Write parsed_value to the data table for name, only for read/query functions."""
     if func not in _STORE_FUNCS:
         return
@@ -512,4 +512,4 @@ def store_result(db: DBManager, name: str, func: str, parsed_value: Any) -> None
         )
     except Exception:
         val = str(parsed_value)
-    db.insert_data(name, val)
+    db.insert_data(name, val, ref_time_stamp)
