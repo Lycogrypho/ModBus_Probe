@@ -197,7 +197,7 @@ class DBManager:
             )
             self.conn.commit()
 
-    def insert_data(self, table_name: str, value: str, ref_time_stamp):
+    def insert_data(self, table_name: str, value: str, ref_time_stamp: str):
         safe = self._sanitize_table(table_name)
         with self.lock:
             self.conn.execute(
@@ -500,7 +500,7 @@ def parse_response(func: str, resp: Any, query: Dict[str, Any]) -> Any:
         return f"Parse error: {e}"
 
 
-def store_result(db: DBManager, name: str, func: str, parsed_value: Any, ref_time_stamp) -> None:
+def store_result(db: DBManager, name: str, func: str, parsed_value: Any, ref_time_stamp: str) -> None:
     """Write parsed_value to the data table for name, only for read/query functions."""
     if func not in _STORE_FUNCS:
         return

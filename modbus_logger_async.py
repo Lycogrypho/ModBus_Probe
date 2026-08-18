@@ -20,7 +20,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config, normalize_tasks, validate_tasks,
+    now_ts, log, load_config, normalize_tasks, validate_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -318,6 +318,7 @@ async def execute_query(
     query: Dict[str, Any],
     cfg: Dict[str, Any],
     address_base: int,
+    cycle_ts: str = "",
 ):
     verbose = cfg.get("verbose", False)
     func = query.get("function")
@@ -360,7 +361,7 @@ async def execute_query(
         parsed_value = multiview_decode(regs, name, kw.get("address", 0))
     else:
         parsed_value = parse_response(func, resp, query)
-    store_result(db, name, func, parsed_value)
+    store_result(db, name, func, parsed_value, cycle_ts)
 
     log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
 
@@ -368,7 +369,7 @@ async def execute_query(
 # ---------- Per-task async runner ----------
 
 async def _run_task(task: Dict[str, Any], client: "ModbusLoggerAsync", db: DBManager,
-                    cfg: Dict[str, Any]) -> None:
+                    cfg: Dict[str, Any], cycle_ts: str = "") -> None:
     """Run one full task (all its queries) for a single cycle iteration."""
     verbose = cfg.get("verbose", False)
     address_base = int(task["connection"].get("address_base", 0))
@@ -381,7 +382,7 @@ async def _run_task(task: Dict[str, Any], client: "ModbusLoggerAsync", db: DBMan
 
     for q in task["queries"]:
         try:
-            await execute_query(client, db, q, cfg, address_base)
+            await execute_query(client, db, q, cfg, address_base, cycle_ts)
         except Exception as e:
             log(f"Exception in task '{task['name']}' query '{q.get('name', q.get('function'))}': {e}", verbose)
 
@@ -458,12 +459,13 @@ async def main():
                 break
             cycle_count += 1
             cycle_start = time.monotonic()
+            cycle_ts = now_ts()
 
             log(f"Starting cycle {cycle_count}", verbose)
 
             # Run all tasks concurrently within each cycle
             results = await asyncio.gather(
-                *[_run_task(task, client, db, cfg) for task, client in zip(tasks, clients)],
+                *[_run_task(task, client, db, cfg, cycle_ts) for task, client in zip(tasks, clients)],
                 return_exceptions=True,
             )
             for task, result in zip(tasks, results):

@@ -166,37 +166,39 @@ class TestStoreResult(unittest.TestCase):
         db = MagicMock()
         return db
 
+    _REF_TS = "2024-01-01T00:00:00+00:00"
+
     def test_stores_for_read_holding_registers(self):
         db = self._db()
-        self.store(db, "my_sensor", "read_holding_registers", 42)
-        db.insert_data.assert_called_once_with("my_sensor", "42")
+        self.store(db, "my_sensor", "read_holding_registers", 42, self._REF_TS)
+        db.insert_data.assert_called_once_with("my_sensor", "42", self._REF_TS)
 
     def test_skips_for_write_function(self):
         db = self._db()
-        self.store(db, "out", "write_coil", True)
+        self.store(db, "out", "write_coil", True, self._REF_TS)
         db.insert_data.assert_not_called()
 
     def test_skips_for_diag_write(self):
         db = self._db()
-        self.store(db, "x", "diag_restart_communication", None)
+        self.store(db, "x", "diag_restart_communication", None, self._REF_TS)
         db.insert_data.assert_not_called()
 
     def test_stores_dict_as_json(self):
         db = self._db()
-        self.store(db, "dev", "read_device_identification", {"1": "Acme"})
+        self.store(db, "dev", "read_device_identification", {"1": "Acme"}, self._REF_TS)
         db.insert_data.assert_called_once()
         stored_val = db.insert_data.call_args[0][1]
         self.assertIn("Acme", stored_val)
 
     def test_stores_none_as_string(self):
         db = self._db()
-        self.store(db, "q", "read_exception_status", None)
-        db.insert_data.assert_called_once_with("q", "None")
+        self.store(db, "q", "read_exception_status", None, self._REF_TS)
+        db.insert_data.assert_called_once_with("q", "None", self._REF_TS)
 
     def test_stores_float(self):
         db = self._db()
-        self.store(db, "temp", "read_holding_registers", 3.14)
-        db.insert_data.assert_called_once_with("temp", "3.14")
+        self.store(db, "temp", "read_holding_registers", 3.14, self._REF_TS)
+        db.insert_data.assert_called_once_with("temp", "3.14", self._REF_TS)
 
 
 # ---------- _CALL_MAP / _STORE_FUNCS cross-module consistency ----------
@@ -241,10 +243,12 @@ class TestDBManager(unittest.TestCase):
         from modbus_common import DBManager
         db = DBManager(":memory:")
         db.ensure_data_table("t")
-        db.insert_data("t", "hello")
+        ref = "2024-01-01T00:00:00+00:00"
+        db.insert_data("t", "hello", ref)
         db.insert_audit('{"q": 1}', is_write=False)
-        row = db.conn.execute("SELECT value FROM t").fetchone()
-        self.assertEqual(row[0], "hello")
+        row = db.conn.execute("SELECT ref_ts, value FROM t").fetchone()
+        self.assertEqual(row[0], ref)
+        self.assertEqual(row[1], "hello")
         audit = db.conn.execute("SELECT is_write FROM audit_trail").fetchone()
         self.assertEqual(audit[0], 0)
         db.close()

@@ -22,7 +22,7 @@ from pymodbus.client.base import ModbusBaseClient
 from pymodbus.pdu import ExceptionResponse
 
 from modbus_common import (
-    log, load_config, normalize_tasks, validate_tasks,
+    now_ts, log, load_config, normalize_tasks, validate_tasks,
     DBManager,
     normalize_modbus_address,
     _CALL_MAP, _STORE_FUNCS,
@@ -369,7 +369,7 @@ class ModbusClientWrapper:
 
 # ---------- Main execution logic ----------
 
-def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, Any], cfg: Dict[str, Any], address_base: int = 0):
+def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, Any], cfg: Dict[str, Any], address_base: int = 0, cycle_ts: str = ""):
     """
     Execute single query dict. Query keys expected:
       - name: unique name for storage
@@ -421,7 +421,7 @@ def execute_query(client: ModbusClientWrapper, db: DBManager, query: Dict[str, A
         parsed_value = multiview_decode(regs, name, kw.get("address", 0))
     else:
         parsed_value = parse_response(func, resp, query)
-    store_result(db, name, func, parsed_value)
+    store_result(db, name, func, parsed_value, cycle_ts)
 
     log(f"Response <- name:{name} parsed:{parsed_value}", verbose)
 
@@ -499,6 +499,7 @@ def main():
                 break
             cycle_count += 1
             cycle_start = time.time()
+            cycle_ts = now_ts()
 
             if verbose:
                 log(f"Starting cycle {cycle_count}", True)
@@ -514,7 +515,7 @@ def main():
 
                 for q in task["queries"]:
                     try:
-                        execute_query(client, db, q, cfg, address_base)
+                        execute_query(client, db, q, cfg, address_base, cycle_ts)
                     except Exception as e:
                         log(f"Exception in task '{task['name']}' query '{q.get('name', q.get('function'))}': {e}", verbose)
 
